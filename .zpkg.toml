@@ -1,0 +1,4 @@
+name = "flags-2-env-cli"
+kind = "cli"
+version = "0.1.0"
+
