@@ -10,15 +10,15 @@ pub enum CliError {
     Config(String),
     #[error("command failed: {0}")]
     Command(String),
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 impl CliError {
     pub fn exit_code(&self) -> i32 {
         match self {
-            Self::Usage(_) => 2,
-            Self::Config(_) => 2,
-            Self::Command(_) => 1,
+            Self::Usage(_) | Self::Config(_) => 2,
+            Self::Command(_) | Self::Io(_) => 1,
         }
     }
 }
-
