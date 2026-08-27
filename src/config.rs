@@ -14,13 +14,13 @@ impl Config {
         let api_base = invocation
             .api_base
             .clone()
-            .or_else(|| std::env::var("FLAGS_2_ENV_API_BASE").ok())
+            .or_else(|| std::env::var(crate::env::API_BASE).ok())
             .unwrap_or_else(|| "http://127.0.0.1:8080".to_string());
         match api_base.trim().is_empty() {
             true => Err(CliError::Config("API base is empty".into())),
             false => Ok(Self {
                 api_base,
-                json: invocation.json || std::env::var("FLAGS_2_ENV_JSON").is_ok(),
+                json: invocation.json || std::env::var(crate::env::JSON).is_ok(),
             }),
         }
     }

@@ -1,4 +1,8 @@
-# flags-2-env surface for `flags2env-platform`
+# flags-2-env surface for `flags2env-platform` / `f2e`
+[identity]
+service = "flags-2-env-cli"
+type_name = "CliEnv"
+
 [flags.config]
 env = "FLAGS_2_ENV_CONFIG"
 long = "config"

@@ -1,12 +1,60 @@
 #![forbid(unsafe_code)]
 
 use crate::error::CliError;
+use std::iter::Peekable;
+use std::path::PathBuf;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Language {
+    Rust,
+    Dart,
+    TypeScript,
+    Gleam,
+}
+
+impl Language {
+    pub fn parse(value: &str) -> Result<Self, CliError> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "rust" | "rs" => Ok(Self::Rust),
+            "dart" => Ok(Self::Dart),
+            "typescript" | "ts" => Ok(Self::TypeScript),
+            "gleam" | "gleamlang" => Ok(Self::Gleam),
+            other => Err(CliError::Usage(format!(
+                "unknown generate language {other} (rust, dart, typescript, gleam)"
+            ))),
+        }
+    }
+
+    pub fn all() -> Vec<Self> {
+        vec![Self::Rust, Self::Dart, Self::TypeScript, Self::Gleam]
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GenerateOpts {
+    pub config: PathBuf,
+    pub out_dir: PathBuf,
+    pub type_name: String,
+    pub languages: Vec<Language>,
+}
+
+impl GenerateOpts {
+    fn defaults() -> Self {
+        Self {
+            config: PathBuf::from(".cli-flags.toml"),
+            out_dir: PathBuf::from("generated"),
+            type_name: "CliEnv".into(),
+            languages: Language::all(),
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
     Help,
     Health,
     Status,
+    Generate(GenerateOpts),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -22,22 +70,30 @@ where
 {
     let mut items = args.into_iter().peekable();
     let command = take_command(&mut items)?;
-    items.try_fold(
-        Invocation {
-            command,
+    match command {
+        Command::Generate(_) => Ok(Invocation {
+            command: Command::Generate(parse_generate(&mut items)?),
             api_base: None,
             json: false,
-        },
-        apply_flag,
-    )
+        }),
+        command => items.try_fold(
+            Invocation {
+                command,
+                api_base: None,
+                json: false,
+            },
+            apply_flag,
+        ),
+    }
 }
 
 fn take_command(
-    items: &mut std::iter::Peekable<impl Iterator<Item = String>>,
+    items: &mut Peekable<impl Iterator<Item = String>>,
 ) -> Result<Command, CliError> {
     match items.peek().map(String::as_str) {
         Some("health") => consume(items, Command::Health),
         Some("status") => consume(items, Command::Status),
+        Some("generate") => consume(items, Command::Generate(GenerateOpts::defaults())),
         Some("-h" | "--help" | "help") => consume(items, Command::Help),
         Some(other) if !other.starts_with('-') => {
             Err(CliError::Usage(format!("unknown command {other}")))
@@ -47,7 +103,7 @@ fn take_command(
 }
 
 fn consume(
-    items: &mut std::iter::Peekable<impl Iterator<Item = String>>,
+    items: &mut Peekable<impl Iterator<Item = String>>,
     command: Command,
 ) -> Result<Command, CliError> {
     items.next();
@@ -72,8 +128,106 @@ fn apply_flag(invocation: Invocation, arg: String) -> Result<Invocation, CliErro
     }
 }
 
+fn parse_generate(
+    items: &mut Peekable<impl Iterator<Item = String>>,
+) -> Result<GenerateOpts, CliError> {
+    let opts = parse_generate_from(GenerateOpts::defaults(), items)?;
+    if opts.type_name.trim().is_empty() {
+        return Err(CliError::Usage("--name must not be empty".into()));
+    }
+    Ok(opts)
+}
+
+fn parse_generate_from(
+    opts: GenerateOpts,
+    items: &mut Peekable<impl Iterator<Item = String>>,
+) -> Result<GenerateOpts, CliError> {
+    let Some(arg) = items.next() else {
+        return Ok(opts);
+    };
+    let opts = apply_generate_arg(opts, arg, items)?;
+    parse_generate_from(opts, items)
+}
+
+fn apply_generate_arg(
+    opts: GenerateOpts,
+    arg: String,
+    items: &mut Peekable<impl Iterator<Item = String>>,
+) -> Result<GenerateOpts, CliError> {
+    match arg.as_str() {
+        "--help" | "-h" => Err(CliError::Usage(help_text().into())),
+        "--config" => Ok(GenerateOpts {
+            config: required_value("--config", items.next())?.into(),
+            ..opts
+        }),
+        flag if flag.starts_with("--config=") => Ok(GenerateOpts {
+            config: flag.trim_start_matches("--config=").into(),
+            ..opts
+        }),
+        "--out" => Ok(GenerateOpts {
+            out_dir: required_value("--out", items.next())?.into(),
+            ..opts
+        }),
+        flag if flag.starts_with("--out=") => Ok(GenerateOpts {
+            out_dir: flag.trim_start_matches("--out=").into(),
+            ..opts
+        }),
+        "--name" => Ok(GenerateOpts {
+            type_name: required_value("--name", items.next())?.to_string(),
+            ..opts
+        }),
+        flag if flag.starts_with("--name=") => Ok(GenerateOpts {
+            type_name: flag.trim_start_matches("--name=").to_string(),
+            ..opts
+        }),
+        "--lang" => Ok(GenerateOpts {
+            languages: parse_languages(&required_value("--lang", items.next())?)?,
+            ..opts
+        }),
+        flag if flag.starts_with("--lang=") => Ok(GenerateOpts {
+            languages: parse_languages(flag.trim_start_matches("--lang="))?,
+            ..opts
+        }),
+        other if !other.starts_with('-') => Ok(GenerateOpts {
+            config: PathBuf::from(other),
+            ..opts
+        }),
+        other => Err(CliError::Usage(format!("unknown generate flag {other}"))),
+    }
+}
+
+fn required_value(flag: &str, value: Option<String>) -> Result<String, CliError> {
+    value
+        .filter(|text| !text.is_empty() && !text.starts_with('-'))
+        .ok_or_else(|| CliError::Usage(format!("{flag} requires a value")))
+}
+
+fn parse_languages(value: &str) -> Result<Vec<Language>, CliError> {
+    let languages = value
+        .split(',')
+        .map(Language::parse)
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut unique = Vec::new();
+    for language in languages {
+        if !unique.contains(&language) {
+            unique.push(language);
+        }
+    }
+    if unique.is_empty() {
+        return Err(CliError::Usage(
+            "--lang requires rust, dart, typescript, and/or gleam".into(),
+        ));
+    }
+    Ok(unique)
+}
+
 pub fn help_text() -> &'static str {
-    "flags2env-platform — flags-2-env CLI\n\nCommands:\n  health\n  status\n"
+    "f2e / flags2env-platform — flags-2-env CLI\n\n\
+Commands:\n  \
+  health\n  \
+  status\n  \
+  generate [config] [--out DIR] [--name TypeName] [--lang rust,dart,typescript,gleam]\n\n\
+generate writes compile-time env key types/interfaces/vars from .cli-flags.toml.\n"
 }
 
 #[cfg(test)]
@@ -120,5 +274,42 @@ mod tests {
     #[test]
     fn trailing_help_overrides_the_selected_command() {
         assert_eq!(parse_line("health --help").unwrap().command, Command::Help);
+    }
+
+    #[test]
+    fn generate_defaults_cover_all_languages() {
+        let invocation = parse(["generate".into()]).expect("parse");
+        match invocation.command {
+            Command::Generate(opts) => {
+                assert_eq!(opts.config.as_os_str(), ".cli-flags.toml");
+                assert_eq!(opts.out_dir.as_os_str(), "generated");
+                assert_eq!(opts.type_name, "CliEnv");
+                assert_eq!(opts.languages, Language::all());
+            }
+            other => panic!("expected generate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn generate_accepts_positional_config_and_lang_subset() {
+        let invocation = parse(
+            [
+                "generate".into(),
+                "flags.toml".into(),
+                "--name".into(),
+                "SidecarEnv".into(),
+                "--lang=rust,gleam".into(),
+            ]
+            .into_iter(),
+        )
+        .expect("parse");
+        match invocation.command {
+            Command::Generate(opts) => {
+                assert_eq!(opts.config.as_os_str(), "flags.toml");
+                assert_eq!(opts.type_name, "SidecarEnv");
+                assert_eq!(opts.languages, vec![Language::Rust, Language::Gleam]);
+            }
+            other => panic!("expected generate, got {other:?}"),
+        }
     }
 }
