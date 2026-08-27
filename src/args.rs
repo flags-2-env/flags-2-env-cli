@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use crate::error::CliError;
+use std::iter::Peekable;
 use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,101 +68,132 @@ pub fn parse<I>(args: I) -> Result<Invocation, CliError>
 where
     I: IntoIterator<Item = String>,
 {
-    let mut command = Command::Help;
-    let mut api_base = None;
-    let mut json = false;
     let mut items = args.into_iter().peekable();
-    if let Some(first) = items.peek() {
-        match first.as_str() {
-            "health" => {
-                command = Command::Health;
-                items.next();
-            }
-            "status" => {
-                command = Command::Status;
-                items.next();
-            }
-            "generate" => {
-                items.next();
-                command = Command::Generate(parse_generate(items)?);
-                return Ok(Invocation {
-                    command,
-                    api_base: None,
-                    json: false,
-                });
-            }
-            "-h" | "--help" | "help" => {
-                command = Command::Help;
-                items.next();
-            }
-            other if !other.starts_with('-') => {
-                return Err(CliError::Usage(format!("unknown command {other}")));
-            }
-            _ => {}
-        }
+    let command = take_command(&mut items)?;
+    match command {
+        Command::Generate(_) => Ok(Invocation {
+            command: Command::Generate(parse_generate(&mut items)?),
+            api_base: None,
+            json: false,
+        }),
+        command => items.try_fold(
+            Invocation {
+                command,
+                api_base: None,
+                json: false,
+            },
+            apply_flag,
+        ),
     }
-    for arg in items {
-        match arg.as_str() {
-            "--json" => json = true,
-            "--help" | "-h" => command = Command::Help,
-            flag if flag.starts_with("--api-base=") => {
-                api_base = Some(flag.trim_start_matches("--api-base=").to_string());
-            }
-            other => return Err(CliError::Usage(format!("unknown flag {other}"))),
-        }
-    }
-    Ok(Invocation {
-        command,
-        api_base,
-        json,
-    })
 }
 
-fn parse_generate<I>(items: I) -> Result<GenerateOpts, CliError>
-where
-    I: IntoIterator<Item = String>,
-{
-    let mut opts = GenerateOpts::defaults();
-    let mut items = items.into_iter();
-    while let Some(arg) = items.next() {
-        match arg.as_str() {
-            "--help" | "-h" => {
-                return Err(CliError::Usage(help_text().into()));
-            }
-            "--config" => {
-                opts.config = required_value("--config", items.next())?.into();
-            }
-            flag if flag.starts_with("--config=") => {
-                opts.config = flag.trim_start_matches("--config=").into();
-            }
-            "--out" => {
-                opts.out_dir = required_value("--out", items.next())?.into();
-            }
-            flag if flag.starts_with("--out=") => {
-                opts.out_dir = flag.trim_start_matches("--out=").into();
-            }
-            "--name" => {
-                opts.type_name = required_value("--name", items.next())?.to_string();
-            }
-            flag if flag.starts_with("--name=") => {
-                opts.type_name = flag.trim_start_matches("--name=").to_string();
-            }
-            "--lang" => {
-                opts.languages = parse_languages(&required_value("--lang", items.next())?)?;
-            }
-            flag if flag.starts_with("--lang=") => {
-                opts.languages = parse_languages(flag.trim_start_matches("--lang="))?;
-            }
-            other if !other.starts_with('-') => {
-                opts.config = PathBuf::from(other);
-            }
-            other => return Err(CliError::Usage(format!("unknown generate flag {other}"))),
+fn take_command(
+    items: &mut Peekable<impl Iterator<Item = String>>,
+) -> Result<Command, CliError> {
+    match items.peek().map(String::as_str) {
+        Some("health") => consume(items, Command::Health),
+        Some("status") => consume(items, Command::Status),
+        Some("generate") => consume(items, Command::Generate(GenerateOpts::defaults())),
+        Some("-h" | "--help" | "help") => consume(items, Command::Help),
+        Some(other) if !other.starts_with('-') => {
+            Err(CliError::Usage(format!("unknown command {other}")))
         }
+        Some(_) | None => Ok(Command::Help),
     }
+}
+
+fn consume(
+    items: &mut Peekable<impl Iterator<Item = String>>,
+    command: Command,
+) -> Result<Command, CliError> {
+    items.next();
+    Ok(command)
+}
+
+fn apply_flag(invocation: Invocation, arg: String) -> Result<Invocation, CliError> {
+    match arg.as_str() {
+        "--json" => Ok(Invocation {
+            json: true,
+            ..invocation
+        }),
+        "--help" | "-h" => Ok(Invocation {
+            command: Command::Help,
+            ..invocation
+        }),
+        flag if flag.starts_with("--api-base=") => Ok(Invocation {
+            api_base: Some(flag.trim_start_matches("--api-base=").to_string()),
+            ..invocation
+        }),
+        other => Err(CliError::Usage(format!("unknown flag {other}"))),
+    }
+}
+
+fn parse_generate(
+    items: &mut Peekable<impl Iterator<Item = String>>,
+) -> Result<GenerateOpts, CliError> {
+    let opts = parse_generate_from(GenerateOpts::defaults(), items)?;
     if opts.type_name.trim().is_empty() {
         return Err(CliError::Usage("--name must not be empty".into()));
     }
     Ok(opts)
+}
+
+fn parse_generate_from(
+    opts: GenerateOpts,
+    items: &mut Peekable<impl Iterator<Item = String>>,
+) -> Result<GenerateOpts, CliError> {
+    let Some(arg) = items.next() else {
+        return Ok(opts);
+    };
+    let opts = apply_generate_arg(opts, arg, items)?;
+    parse_generate_from(opts, items)
+}
+
+fn apply_generate_arg(
+    opts: GenerateOpts,
+    arg: String,
+    items: &mut Peekable<impl Iterator<Item = String>>,
+) -> Result<GenerateOpts, CliError> {
+    match arg.as_str() {
+        "--help" | "-h" => Err(CliError::Usage(help_text().into())),
+        "--config" => Ok(GenerateOpts {
+            config: required_value("--config", items.next())?.into(),
+            ..opts
+        }),
+        flag if flag.starts_with("--config=") => Ok(GenerateOpts {
+            config: flag.trim_start_matches("--config=").into(),
+            ..opts
+        }),
+        "--out" => Ok(GenerateOpts {
+            out_dir: required_value("--out", items.next())?.into(),
+            ..opts
+        }),
+        flag if flag.starts_with("--out=") => Ok(GenerateOpts {
+            out_dir: flag.trim_start_matches("--out=").into(),
+            ..opts
+        }),
+        "--name" => Ok(GenerateOpts {
+            type_name: required_value("--name", items.next())?.to_string(),
+            ..opts
+        }),
+        flag if flag.starts_with("--name=") => Ok(GenerateOpts {
+            type_name: flag.trim_start_matches("--name=").to_string(),
+            ..opts
+        }),
+        "--lang" => Ok(GenerateOpts {
+            languages: parse_languages(&required_value("--lang", items.next())?)?,
+            ..opts
+        }),
+        flag if flag.starts_with("--lang=") => Ok(GenerateOpts {
+            languages: parse_languages(flag.trim_start_matches("--lang="))?,
+            ..opts
+        }),
+        other if !other.starts_with('-') => Ok(GenerateOpts {
+            config: PathBuf::from(other),
+            ..opts
+        }),
+        other => Err(CliError::Usage(format!("unknown generate flag {other}"))),
+    }
 }
 
 fn required_value(flag: &str, value: Option<String>) -> Result<String, CliError> {
@@ -171,19 +203,22 @@ fn required_value(flag: &str, value: Option<String>) -> Result<String, CliError>
 }
 
 fn parse_languages(value: &str) -> Result<Vec<Language>, CliError> {
-    let mut languages = Vec::new();
-    for part in value.split(',') {
-        let language = Language::parse(part)?;
-        if !languages.contains(&language) {
-            languages.push(language);
+    let languages = value
+        .split(',')
+        .map(Language::parse)
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut unique = Vec::new();
+    for language in languages {
+        if !unique.contains(&language) {
+            unique.push(language);
         }
     }
-    if languages.is_empty() {
+    if unique.is_empty() {
         return Err(CliError::Usage(
             "--lang requires rust, dart, typescript, and/or gleam".into(),
         ));
     }
-    Ok(languages)
+    Ok(unique)
 }
 
 pub fn help_text() -> &'static str {
@@ -197,7 +232,49 @@ generate writes compile-time env key types/interfaces/vars from .cli-flags.toml.
 
 #[cfg(test)]
 mod tests {
-    use super::{parse, Command, Language};
+    use super::*;
+
+    fn parse_line(line: &str) -> Result<Invocation, CliError> {
+        parse(line.split_whitespace().map(str::to_string))
+    }
+
+    #[test]
+    fn defaults_to_help_without_a_command() {
+        assert_eq!(
+            parse_line("").unwrap(),
+            Invocation {
+                command: Command::Help,
+                api_base: None,
+                json: false,
+            }
+        );
+    }
+
+    #[test]
+    fn folds_flags_without_mutating_an_accumulator() {
+        assert_eq!(
+            parse_line("status --json --api-base=http://127.0.0.1:9").unwrap(),
+            Invocation {
+                command: Command::Status,
+                api_base: Some("http://127.0.0.1:9".into()),
+                json: true,
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_commands_and_flags() {
+        assert!(matches!(parse_line("migrate"), Err(CliError::Usage(_))));
+        assert!(matches!(
+            parse_line("health --quiet"),
+            Err(CliError::Usage(_))
+        ));
+    }
+
+    #[test]
+    fn trailing_help_overrides_the_selected_command() {
+        assert_eq!(parse_line("health --help").unwrap().command, Command::Help);
+    }
 
     #[test]
     fn generate_defaults_cover_all_languages() {
