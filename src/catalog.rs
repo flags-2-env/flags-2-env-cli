@@ -50,14 +50,8 @@ pub fn parse_catalog(text: &str, type_name_override: Option<&str>) -> Result<Cat
         )));
     }
     let mut flags = Vec::new();
-    if let Some(flag_tables) = table.get("flags").and_then(|value| value.as_table()) {
-        for (name, value) in flag_tables {
-            let Some(flag_table) = value.as_table() else {
-                continue;
-            };
-            flags.push(flag_from_table(name, flag_table)?);
-        }
-    }
+    collect_flags(&table, &mut flags)?;
+    flags = uniquify_flags(flags);
     if flags.is_empty() {
         return Err(CliError::Config(
             "no [flags.*] entries with env keys found".into(),
@@ -68,6 +62,45 @@ pub fn parse_catalog(text: &str, type_name_override: Option<&str>) -> Result<Cat
         type_name,
         flags,
     })
+}
+
+fn collect_flags(table: &toml::Table, flags: &mut Vec<FlagSpec>) -> Result<(), CliError> {
+    if let Some(flag_tables) = table.get("flags").and_then(|value| value.as_table()) {
+        for (name, value) in flag_tables {
+            let Some(flag_table) = value.as_table() else {
+                continue;
+            };
+            if flag_table.get("env").and_then(|value| value.as_str()).is_none() {
+                continue;
+            }
+            flags.push(flag_from_table(name, flag_table)?);
+        }
+    }
+    if let Some(commands) = table.get("commands").and_then(|value| value.as_table()) {
+        for (_name, value) in commands {
+            if let Some(command) = value.as_table() {
+                collect_flags(command, flags)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn uniquify_flags(flags: Vec<FlagSpec>) -> Vec<FlagSpec> {
+    let mut seen_env = std::collections::BTreeSet::new();
+    let mut seen_snake = std::collections::BTreeSet::new();
+    let mut out = Vec::new();
+    for mut flag in flags {
+        if !seen_env.insert(flag.env.clone()) {
+            continue;
+        }
+        if !seen_snake.insert(flag.snake.clone()) {
+            flag.snake = to_snake(&flag.env);
+            flag.rust_const = flag.snake.to_ascii_uppercase();
+        }
+        out.push(flag);
+    }
+    out
 }
 
 fn flag_from_table(name: &str, table: &toml::Table) -> Result<FlagSpec, CliError> {
@@ -220,5 +253,21 @@ help = "HTTP listen address"
         assert_eq!(catalog.flags[0].env, "VXL_SIDECAR_BIND");
         assert_eq!(catalog.flags[0].rust_const, "BIND");
         assert_eq!(catalog.flags[0].default.as_deref(), Some("127.0.0.1:9090"));
+    }
+
+    #[test]
+    fn catalog_walks_nested_command_flags() {
+        let catalog = parse_catalog(
+            r#"
+[commands.query.flags.dialect]
+env = "CLARITAS_DIALECT"
+default = "sql"
+"#,
+            Some("CliEnv"),
+        )
+        .expect("catalog");
+        assert_eq!(catalog.flags.len(), 1);
+        assert_eq!(catalog.flags[0].env, "CLARITAS_DIALECT");
+        assert_eq!(catalog.flags[0].rust_const, "DIALECT");
     }
 }

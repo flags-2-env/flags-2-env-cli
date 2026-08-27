@@ -12,14 +12,25 @@ pub fn run(config: &crate::args::GenerateOpts, _runtime: &Config) -> Result<(), 
             config.config.display()
         ))
     })?;
-    let catalog = crate::catalog::parse_catalog(&text, Some(&config.type_name))?;
+    let catalog = crate::catalog::parse_catalog(
+        &text,
+        if config.type_name != "CliEnv" {
+            Some(config.type_name.as_str())
+        } else {
+            None
+        },
+    )?;
     for language in &config.languages {
         let dir = config.out_dir.join(crate::generate::dir_name(*language));
         fs::create_dir_all(&dir)?;
-        let path = dir.join(crate::generate::file_name(*language));
-        let source = crate::generate::render(*language, &catalog);
-        write_if_changed(&path, &source)?;
-        eprintln!("wrote {}", path.display());
+        let types_path = dir.join(crate::generate::file_name(*language));
+        let types_source = crate::generate::render(*language, &catalog);
+        write_if_changed(&types_path, &types_source)?;
+        eprintln!("wrote {}", types_path.display());
+        let runtime_path = dir.join(crate::generate::runtime_file_name(*language));
+        let runtime_source = crate::generate::render_runtime(*language, &catalog);
+        write_if_changed(&runtime_path, &runtime_source)?;
+        eprintln!("wrote {}", runtime_path.display());
     }
     Ok(())
 }
