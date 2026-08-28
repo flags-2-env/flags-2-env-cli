@@ -99,7 +99,7 @@ export function requireEnv(
   if (trimmed) {
     return trimmed;
   }
-  throw new MissingEnvError({ name, expectedType, examples });
+  throw new MissingEnvError({ envKey: name, expectedType, examples });
 }
 
 function pick(
@@ -159,6 +159,17 @@ function dotenvEnabled(): boolean {
   return !["0", "false", "FALSE", "no", "NO"].includes(value?.trim() ?? "");
 }
 
+function isSafeDotenvPath(path: string): boolean {
+  if (!path || path.includes("\0") || path.includes("..")) {
+    return false;
+  }
+  if (path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path)) {
+    return false;
+  }
+  const base = path.split(/[\\/]/).pop() ?? "";
+  return base === ".env" || base.startsWith(".env.");
+}
+
 export function loadDotenvFiles(files: readonly string[]): Record<string, string> {
   if (!dotenvEnabled() || typeof process === "undefined") {
     return {};
@@ -169,7 +180,7 @@ export function loadDotenvFiles(files: readonly string[]): Record<string, string
   } catch {
     return {};
   }
-  return files.reduce<Record<string, string>>((acc, path) => {
+  return files.filter(isSafeDotenvPath).reduce<Record<string, string>>((acc, path) => {
     try {
       return { ...acc, ...parseDotenv(fs!.readFileSync(path, "utf8")) };
     } catch {
@@ -178,18 +189,19 @@ export function loadDotenvFiles(files: readonly string[]): Record<string, string
   }, {});
 }
 export interface MissingEnv {
-  readonly name: string;
+  readonly envKey: string;
   readonly expectedType: string;
   readonly examples: readonly string[];
 }
 
 export class MissingEnvError extends Error implements MissingEnv {
-  readonly name: string;
+  readonly envKey: string;
   readonly expectedType: string;
   readonly examples: readonly string[];
   constructor(fields: MissingEnv) {
-    super(`missing required environment variable ${fields.name}\n  expected type: ${fields.expectedType}\n  examples: ${fields.examples.join(", ")}`);
-    this.name = fields.name;
+    super(`missing required environment variable ${fields.envKey}\n  expected type: ${fields.expectedType}\n  examples: ${fields.examples.join(", ")}`);
+    this.name = "MissingEnvError";
+    this.envKey = fields.envKey;
     this.expectedType = fields.expectedType;
     this.examples = fields.examples;
   }
@@ -219,6 +231,15 @@ export function loadEnvMapFromOs(
   return loadEnvMap(shell, loadDotenvFiles(DOTENV_FILES), {});
 }
 
-/** Resolved overlay keyed by env var name. */
-export const env = loadEnvMapFromOs();
+/** Like `loadFrom`, but throws when a required key is missing or empty. */
+export function tryLoadFrom(lookup: (key: string) => string | undefined): CliEnvValues {
+  const values = loadFrom(lookup);
+  return values;
+}
+
+export function tryLoadFromOs(
+  env: Record<string, string | undefined> = typeof process !== "undefined" ? process.env : {},
+): CliEnvValues {
+  return tryLoadFrom((key) => env[key]);
+}
 

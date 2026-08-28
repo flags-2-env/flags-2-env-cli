@@ -55,11 +55,7 @@ pub fn typescript_env(catalog: &Catalog) -> String {
     for flag in &catalog.flags {
         let value = flag.default.as_deref().unwrap_or("");
         if !value.is_empty() {
-            defaults.push_str(&format!(
-                "    {}: \"{}\",\n",
-                flag.env,
-                ts_escape(value)
-            ));
+            defaults.push_str(&format!("    {}: \"{}\",\n", flag.env, ts_escape(value)));
         }
     }
     let mut requires = String::new();

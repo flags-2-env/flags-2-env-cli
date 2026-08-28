@@ -81,6 +81,13 @@ pub fn generated_flat_name(language: Language) -> &'static str {
     }
 }
 
+pub fn dart_platform_files() -> [(&'static str, &'static str); 2] {
+    [
+        ("env_io.dart", dart::ENV_IO.trim_start()),
+        ("env_io_stub.dart", dart::ENV_IO_STUB.trim_start()),
+    ]
+}
+
 pub fn dir_name(language: Language) -> &'static str {
     match language {
         Language::Rust => "rust",

@@ -4,8 +4,7 @@ use super::generated;
 
 /// Code-level defaults. Overlay values from flags-2-env (`.env` vs process env vs argv) win.
 pub fn defaults() -> std::collections::BTreeMap<String, String> {
-    std::collections::BTreeMap::from([
-    ])
+    std::collections::BTreeMap::from([])
 }
 
 /// Merge service defaults under the flags-2-env overlay.
@@ -19,7 +18,10 @@ pub fn load() -> Result<std::collections::BTreeMap<String, String>, generated::M
 }
 
 pub fn get<'a>(env: &'a std::collections::BTreeMap<String, String>, key: &str) -> Option<&'a str> {
-    env.get(key).map(String::as_str).map(str::trim).filter(|value| !value.is_empty())
+    env.get(key)
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
 }
 
 #[cfg(test)]

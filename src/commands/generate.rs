@@ -7,10 +7,7 @@ use std::path::Path;
 
 pub fn run(config: &crate::args::GenerateOpts, _runtime: &Config) -> Result<(), CliError> {
     let text = fs::read_to_string(&config.config).map_err(|err| {
-        CliError::Config(format!(
-            "could not read {}: {err}",
-            config.config.display()
-        ))
+        CliError::Config(format!("could not read {}: {err}", config.config.display()))
     })?;
     let catalog = crate::catalog::parse_catalog(
         &text,
@@ -31,6 +28,13 @@ pub fn run(config: &crate::args::GenerateOpts, _runtime: &Config) -> Result<(), 
         let runtime_source = crate::generate::render_runtime(*language, &catalog);
         write_if_changed(&runtime_path, &runtime_source)?;
         eprintln!("wrote {}", runtime_path.display());
+        if *language == crate::args::Language::Dart {
+            for (name, source) in crate::generate::dart_platform_files() {
+                let path = dir.join(name);
+                write_if_changed(&path, source)?;
+                eprintln!("wrote {}", path.display());
+            }
+        }
     }
     if let Some(src_env) = &config.src_env {
         write_src_env(src_env, &config.languages, &catalog)?;
@@ -44,7 +48,10 @@ fn write_src_env(
     catalog: &crate::catalog::Catalog,
 ) -> Result<(), CliError> {
     fs::create_dir_all(src_env)?;
-    write_if_changed(&src_env.join("readme.md"), crate::generate::scaffold_readme())?;
+    write_if_changed(
+        &src_env.join("readme.md"),
+        crate::generate::scaffold_readme(),
+    )?;
     eprintln!("wrote {}", src_env.join("readme.md").display());
     if languages.contains(&crate::args::Language::Rust) {
         write_if_absent(src_env.join("mod.rs"), crate::generate::scaffold_mod_rs())?;
@@ -56,6 +63,12 @@ fn write_src_env(
         eprintln!("wrote {}", generated_path.display());
         if let Some(wrapper) = crate::generate::scaffold_env(*language, catalog) {
             write_if_absent(src_env.join(crate::generate::file_name(*language)), wrapper)?;
+        }
+    }
+    if languages.contains(&crate::args::Language::Dart) {
+        for (name, source) in crate::generate::dart_platform_files() {
+            write_if_changed(&src_env.join(name), source)?;
+            eprintln!("wrote {}", src_env.join(name).display());
         }
     }
     Ok(())
@@ -71,28 +84,36 @@ fn combined_generated(
         crate::args::Language::Rust => {
             format!("{types}\n{}\n", strip_inner_attributes(&runtime))
         }
-        crate::args::Language::Dart => {
-            format!(
-                "import 'dart:io';\n\n{types}\n{}\n",
-                strip_dart_imports(&runtime)
-            )
-        }
+        crate::args::Language::Dart => hoist_dart_imports(&types, &runtime),
         _ => format!("{types}\n{runtime}\n"),
     }
+}
+
+fn hoist_dart_imports(types: &str, runtime: &str) -> String {
+    let mut imports = Vec::new();
+    let mut body = String::new();
+    for source in [types, runtime] {
+        for line in source.lines() {
+            if line.trim_start().starts_with("import ") {
+                if !imports.iter().any(|existing| existing == line) {
+                    imports.push(line.to_string());
+                }
+            } else {
+                body.push_str(line);
+                body.push('\n');
+            }
+        }
+    }
+    if imports.is_empty() {
+        return body;
+    }
+    format!("{}\n\n{body}", imports.join("\n"))
 }
 
 fn strip_inner_attributes(source: &str) -> String {
     source
         .lines()
         .filter(|line| !line.trim_start().starts_with("#!["))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn strip_dart_imports(source: &str) -> String {
-    source
-        .lines()
-        .filter(|line| !line.trim_start().starts_with("import "))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -150,16 +171,25 @@ examples = ["tok_live_123"]
             Some("DemoEnv"),
         )
         .unwrap();
-        write_src_env(&dir, &[Language::Rust, Language::TypeScript], &catalog).unwrap();
+        write_src_env(
+            &dir,
+            &[Language::Rust, Language::TypeScript, Language::Dart],
+            &catalog,
+        )
+        .unwrap();
         let readme = fs::read_to_string(dir.join("readme.md")).unwrap();
         assert!(readme.contains("flags > env_shell > env_file"));
         let rust = fs::read_to_string(dir.join("generated.rs")).unwrap();
         assert!(rust.contains("DEMO_BIND"));
         assert!(rust.contains("missing required environment variable"));
-        assert!(rust.contains("tok_live_123"));
+        assert!(rust.contains("<redacted>"));
+        assert!(!rust.contains("tok_live_123"));
+        assert!(rust.contains("try_load_from_os"));
         assert!(rust.contains("load_env_map"));
         assert!(dir.join("env.rs").exists());
         assert!(dir.join("env.ts").exists());
+        assert!(dir.join("env_io.dart").exists());
+        assert!(dir.join("env_io_stub.dart").exists());
         let _ = fs::remove_dir_all(&dir);
     }
 }

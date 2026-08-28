@@ -26,10 +26,7 @@ pub fn render(catalog: &Catalog) -> String {
         }
     }
     out.push('\n');
-    out.push_str(&format!(
-        "export interface {} {{\n",
-        catalog.type_name
-    ));
+    out.push_str(&format!("export interface {} {{\n", catalog.type_name));
     for flag in &catalog.flags {
         let optional = if flag.default.is_some() { "" } else { "?" };
         out.push_str(&format!(
@@ -76,7 +73,43 @@ pub fn render_runtime(catalog: &Catalog) -> String {
     ));
     out.push_str(TS_RUNTIME_HELPERS);
     out.push_str(&crate::generate::overlay::render_typescript(catalog));
+    out.push_str(&render_try_load(&values, catalog));
     out
+}
+
+fn render_try_load(values: &str, catalog: &Catalog) -> String {
+    let mut out = format!(
+        "\n/** Like `loadFrom`, but throws when a required key is missing or empty. */\nexport function tryLoadFrom(lookup: (key: string) => string | undefined): {values} {{\n  const values = loadFrom(lookup);\n"
+    );
+    for flag in catalog
+        .flags
+        .iter()
+        .filter(|flag| flag.required && flag.default.is_none())
+    {
+        out.push_str(&format!(
+            "  if (values.{snake} === undefined) {{\n    throw new MissingEnvError({{ envKey: \"{env}\", expectedType: \"{ty}\", examples: {examples} }});\n  }}\n",
+            snake = flag.snake,
+            env = ts_escape(&flag.env),
+            ty = flag.flag_type,
+            examples = ts_try_examples(flag),
+        ));
+    }
+    out.push_str("  return values;\n}\n\n");
+    out.push_str(&format!(
+        "export function tryLoadFromOs(\n  env: Record<string, string | undefined> = typeof process !== \"undefined\" ? process.env : {{}},\n): {values} {{\n  return tryLoadFrom((key) => env[key]);\n}}\n"
+    ));
+    out
+}
+
+fn ts_try_examples(flag: &crate::catalog::FlagSpec) -> String {
+    format!(
+        "[{}]",
+        crate::catalog::example_values(flag)
+            .iter()
+            .map(|value| format!("\"{}\"", ts_escape(value)))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
 }
 
 fn ts_load_expr(flag: &crate::catalog::FlagSpec) -> String {
@@ -211,6 +244,10 @@ default = "127.0.0.1:9090"
         assert!(source.contains("export interface SidecarEnvValues"));
         assert!(source.contains("export function loadFrom"));
         assert!(source.contains("export function loadFromOs"));
+        assert!(source.contains("export function tryLoadFromOs"));
         assert!(source.contains("lookup(\"VXL_SIDECAR_BIND\")"));
+        assert!(source.contains("this.name = \"MissingEnvError\""));
+        assert!(source.contains("readonly envKey: string"));
+        assert!(source.contains("isSafeDotenvPath"));
     }
 }
