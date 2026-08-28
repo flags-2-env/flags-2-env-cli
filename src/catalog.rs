@@ -11,6 +11,36 @@ pub struct FlagSpec {
     pub flag_type: String,
     pub default: Option<String>,
     pub help: Option<String>,
+    pub required: bool,
+    pub examples: Vec<String>,
+    pub dotenv_override: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnvLoad {
+    pub load: bool,
+    pub files: Vec<String>,
+    pub override_dotenv: bool,
+    pub order: Vec<String>,
+}
+
+impl Default for EnvLoad {
+    fn default() -> Self {
+        Self {
+            load: true,
+            files: vec![".env".into()],
+            override_dotenv: false,
+            order: default_source_order(),
+        }
+    }
+}
+
+pub fn default_source_order() -> Vec<String> {
+    vec!["flags".into(), "env_shell".into(), "env_file".into()]
+}
+
+pub fn dotenv_override_order() -> Vec<String> {
+    vec!["flags".into(), "env_file".into(), "env_shell".into()]
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -18,6 +48,8 @@ pub struct Catalog {
     pub service: Option<String>,
     pub type_name: String,
     pub flags: Vec<FlagSpec>,
+    pub env_load: EnvLoad,
+    pub order_of_preference: Vec<(String, Vec<String>)>,
 }
 
 pub fn parse_catalog(text: &str, type_name_override: Option<&str>) -> Result<Catalog, CliError> {
@@ -61,7 +93,61 @@ pub fn parse_catalog(text: &str, type_name_override: Option<&str>) -> Result<Cat
         service,
         type_name,
         flags,
+        env_load: parse_env_load(table.get("env").and_then(|value| value.as_table())),
+        order_of_preference: parse_order_of_preference(
+            table
+                .get("order-of-preference")
+                .and_then(|value| value.as_table()),
+        ),
     })
+}
+
+fn parse_env_load(table: Option<&toml::Table>) -> EnvLoad {
+    let Some(table) = table else {
+        return EnvLoad::default();
+    };
+    let mut load = EnvLoad::default();
+    if let Some(flag) = table.get("load").and_then(|value| value.as_bool()) {
+        load.load = flag;
+    }
+    if let Some(files) = table.get("files") {
+        load.files = toml_string_list(files);
+    }
+    if let Some(flag) = table.get("override").and_then(|value| value.as_bool()) {
+        load.override_dotenv = flag;
+    }
+    if let Some(order) = table.get("order") {
+        let parsed = toml_string_list(order);
+        if parsed.len() >= 2 {
+            load.order = complete_source_order(parsed);
+        }
+    }
+    if !load.load || load.files.is_empty() {
+        load.load = false;
+        load.files.clear();
+    }
+    load
+}
+
+fn parse_order_of_preference(table: Option<&toml::Table>) -> Vec<(String, Vec<String>)> {
+    let Some(table) = table else {
+        return Vec::new();
+    };
+    table
+        .iter()
+        .map(|(key, value)| (key.clone(), complete_source_order(toml_string_list(value))))
+        .filter(|(_, order)| order.len() >= 2)
+        .collect()
+}
+
+fn complete_source_order(mut order: Vec<String>) -> Vec<String> {
+    order.retain(|source| matches!(source.as_str(), "flags" | "env_shell" | "env_file"));
+    for source in default_source_order() {
+        if !order.iter().any(|item| item == &source) {
+            order.push(source);
+        }
+    }
+    order
 }
 
 fn collect_flags(table: &toml::Table, flags: &mut Vec<FlagSpec>) -> Result<(), CliError> {
@@ -132,6 +218,19 @@ fn flag_from_table(name: &str, table: &toml::Table) -> Result<FlagSpec, CliError
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
+    let required = table
+        .get("required")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let examples = table
+        .get("examples")
+        .or_else(|| table.get("example"))
+        .map(toml_string_list)
+        .unwrap_or_default();
+    let dotenv_override = table
+        .get("dotenv_override")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
     Ok(FlagSpec {
         name: name.to_string(),
         env,
@@ -140,7 +239,18 @@ fn flag_from_table(name: &str, table: &toml::Table) -> Result<FlagSpec, CliError
         flag_type,
         default,
         help,
+        required,
+        examples,
+        dotenv_override,
     })
+}
+
+fn toml_string_list(value: &toml::Value) -> Vec<String> {
+    match value {
+        toml::Value::String(text) => vec![text.clone()],
+        toml::Value::Array(items) => items.iter().filter_map(toml_to_string).collect(),
+        _ => Vec::new(),
+    }
 }
 
 fn toml_to_string(value: &toml::Value) -> Option<String> {
@@ -209,6 +319,43 @@ pub fn to_pascal(name: &str) -> String {
         .collect()
 }
 
+impl Catalog {
+    pub fn source_order_for(&self, flag: &FlagSpec) -> Vec<String> {
+        if let Some((_, order)) = self
+            .order_of_preference
+            .iter()
+            .find(|(key, _)| key == &flag.env)
+        {
+            return order.clone();
+        }
+        if flag.dotenv_override || self.env_load.override_dotenv {
+            return dotenv_override_order();
+        }
+        self.env_load.order.clone()
+    }
+}
+
+pub fn example_values(flag: &FlagSpec) -> Vec<String> {
+    if !flag.examples.is_empty() {
+        return flag.examples.clone();
+    }
+    match flag.flag_type.as_str() {
+        "bool" => vec!["true".into(), "false".into(), "1".into(), "0".into()],
+        "int" => vec!["8080".into(), "0".into()],
+        "float" => vec!["1.0".into(), "0.5".into()],
+        _ if flag.env.contains("URL") || flag.env.contains("BASE") || flag.env.contains("ORIGIN") => {
+            vec![
+                "http://127.0.0.1:8080".into(),
+                "https://api.example.test".into(),
+            ]
+        }
+        _ if flag.env.contains("BIND") || flag.env.contains("LISTEN") => {
+            vec!["127.0.0.1:8080".into(), "0.0.0.0:8080".into()]
+        }
+        _ => vec!["example-value".into()],
+    }
+}
+
 fn is_ident_start(name: &str) -> bool {
     let mut chars = name.chars();
     match chars.next() {
@@ -269,5 +416,58 @@ default = "sql"
         assert_eq!(catalog.flags.len(), 1);
         assert_eq!(catalog.flags[0].env, "CLARITAS_DIALECT");
         assert_eq!(catalog.flags[0].rust_const, "DIALECT");
+    }
+
+    #[test]
+    fn catalog_reads_required_examples_and_dotenv_override() {
+        let catalog = parse_catalog(
+            r#"
+[env]
+load = true
+files = [".env", ".env.local"]
+override = false
+order = ["flags", "env_shell", "env_file"]
+
+[order-of-preference]
+API_TOKEN = ["env_file", "env_shell", "flags"]
+
+[flags.token]
+env = "API_TOKEN"
+required = true
+examples = ["tok_live_123", "tok_test_abc"]
+dotenv_override = true
+"#,
+            Some("CliEnv"),
+        )
+        .expect("catalog");
+        assert!(catalog.env_load.load);
+        assert_eq!(catalog.env_load.files, vec![".env", ".env.local"]);
+        assert_eq!(catalog.flags[0].required, true);
+        assert_eq!(
+            catalog.flags[0].examples,
+            vec!["tok_live_123", "tok_test_abc"]
+        );
+        assert_eq!(
+            catalog.source_order_for(&catalog.flags[0]),
+            vec!["env_file", "env_shell", "flags"]
+        );
+    }
+
+    #[test]
+    fn server_env_load_false_reads_no_dotenv_files() {
+        let catalog = parse_catalog(
+            r#"
+[env]
+load = false
+
+[flags.bind]
+env = "APP_BIND"
+default = "127.0.0.1:8080"
+"#,
+            None,
+        )
+        .expect("catalog");
+        assert!(!catalog.env_load.load);
+        assert!(catalog.env_load.files.is_empty());
     }
 }

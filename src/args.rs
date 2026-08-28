@@ -36,6 +36,7 @@ pub struct GenerateOpts {
     pub out_dir: PathBuf,
     pub type_name: String,
     pub languages: Vec<Language>,
+    pub src_env: Option<PathBuf>,
 }
 
 impl GenerateOpts {
@@ -45,6 +46,7 @@ impl GenerateOpts {
             out_dir: PathBuf::from("generated"),
             type_name: "CliEnv".into(),
             languages: Language::all(),
+            src_env: None,
         }
     }
 }
@@ -188,11 +190,26 @@ fn apply_generate_arg(
             languages: parse_languages(flag.trim_start_matches("--lang="))?,
             ..opts
         }),
+        "--src-env" => Ok(GenerateOpts {
+            src_env: Some(peek_optional_path(items).into()),
+            ..opts
+        }),
+        flag if flag.starts_with("--src-env=") => Ok(GenerateOpts {
+            src_env: Some(flag.trim_start_matches("--src-env=").into()),
+            ..opts
+        }),
         other if !other.starts_with('-') => Ok(GenerateOpts {
             config: PathBuf::from(other),
             ..opts
         }),
         other => Err(CliError::Usage(format!("unknown generate flag {other}"))),
+    }
+}
+
+fn peek_optional_path(items: &mut Peekable<impl Iterator<Item = String>>) -> String {
+    match items.peek() {
+        Some(next) if !next.is_empty() && !next.starts_with('-') => items.next().unwrap(),
+        _ => "src/env".into(),
     }
 }
 
@@ -227,7 +244,8 @@ Commands:\n  \
   health\n  \
   status\n  \
   generate [config] [--out DIR] [--name TypeName] [--lang rust,dart,typescript,gleam]\n\n\
-generate writes compile-time env key types/interfaces/vars from .cli-flags.toml.\n"
+generate writes compile-time env key types/interfaces/vars from .cli-flags.toml.\n  \
+  --src-env [DIR]  also scaffold src/env/env.{rs,ts,dart} with .env vs process-env overlay\n"
 }
 
 #[cfg(test)]
@@ -308,6 +326,21 @@ mod tests {
                 assert_eq!(opts.config.as_os_str(), "flags.toml");
                 assert_eq!(opts.type_name, "SidecarEnv");
                 assert_eq!(opts.languages, vec![Language::Rust, Language::Gleam]);
+                assert_eq!(opts.src_env, None);
+            }
+            other => panic!("expected generate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn generate_src_env_defaults_to_src_env() {
+        let invocation = parse(["generate".into(), "--src-env".into()]).expect("parse");
+        match invocation.command {
+            Command::Generate(opts) => {
+                assert_eq!(
+                    opts.src_env.as_deref().map(|path| path.as_os_str()),
+                    Some(std::ffi::OsStr::new("src/env"))
+                );
             }
             other => panic!("expected generate, got {other:?}"),
         }

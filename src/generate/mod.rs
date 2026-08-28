@@ -2,7 +2,9 @@
 
 mod dart;
 mod gleam;
+mod overlay;
 mod rust;
+mod scaffold;
 mod typescript;
 
 use crate::args::Language;
@@ -41,6 +43,41 @@ pub fn runtime_file_name(language: Language) -> &'static str {
         Language::Dart => "runtime.dart",
         Language::TypeScript => "runtime.ts",
         Language::Gleam => "runtime.gleam",
+    }
+}
+
+pub fn render_overlay(language: Language, catalog: &Catalog) -> Option<String> {
+    match language {
+        Language::Rust => Some(overlay::render_rust(catalog)),
+        Language::Dart => Some(overlay::render_dart(catalog)),
+        Language::TypeScript => Some(overlay::render_typescript(catalog)),
+        Language::Gleam => None,
+    }
+}
+
+pub fn scaffold_readme() -> &'static str {
+    scaffold::readme()
+}
+
+pub fn scaffold_mod_rs() -> &'static str {
+    scaffold::rust_mod()
+}
+
+pub fn scaffold_env(language: Language, catalog: &Catalog) -> Option<String> {
+    match language {
+        Language::Rust => Some(scaffold::rust_env(catalog)),
+        Language::Dart => Some(scaffold::dart_env(catalog)),
+        Language::TypeScript => Some(scaffold::typescript_env(catalog)),
+        Language::Gleam => None,
+    }
+}
+
+pub fn generated_flat_name(language: Language) -> &'static str {
+    match language {
+        Language::Rust => "generated.rs",
+        Language::Dart => "generated.dart",
+        Language::TypeScript => "generated.ts",
+        Language::Gleam => "generated.gleam",
     }
 }
 

@@ -7,6 +7,5 @@ pub mod config;
 pub mod error;
 pub mod generate;
 
-#[path = "../generated/rust/env.rs"]
 pub mod env;
 

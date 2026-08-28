@@ -75,6 +75,7 @@ pub fn render_runtime(catalog: &Catalog) -> String {
         "export function loadFromOs(\n  env: Record<string, string | undefined> = typeof process !== \"undefined\" ? process.env : {{}},\n): {values} {{\n  return loadFrom((key) => env[key]);\n}}\n"
     ));
     out.push_str(TS_RUNTIME_HELPERS);
+    out.push_str(&crate::generate::overlay::render_typescript(catalog));
     out
 }
 
