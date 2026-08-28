@@ -84,6 +84,7 @@ pub fn render_runtime(catalog: &Catalog) -> String {
     ));
     out.push_str(RUST_RUNTIME_HELPERS);
     out.push_str(&crate::generate::overlay::render_rust(catalog));
+    out.push_str(&super::checker::render_rust(catalog));
     out.push_str(&render_try_load(&values, catalog));
     out
 }
@@ -257,6 +258,8 @@ default = "127.0.0.1:9090"
         assert!(source.contains("load_env_map"));
         assert!(source.contains("env_shell"));
         assert!(source.contains("fn is_safe_dotenv_path"));
+        assert!(source.contains("pub fn check_os_env"));
+        assert!(source.contains("OS_ENV_SCHEMA_JSON"));
     }
 
     #[test]

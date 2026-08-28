@@ -1,11 +1,19 @@
 #![forbid(unsafe_code)]
 
+mod checker;
 mod dart;
+mod freeze;
 mod gleam;
+mod json_schema;
 mod overlay;
+mod readme;
 mod rust;
 mod scaffold;
 mod typescript;
+
+pub use freeze::{freeze, write_frozen};
+pub use json_schema::{os_schema, render_os_schema, render_values_schema, values_schema};
+pub use readme::{frozen as generated_readme, not_frozen as generated_readme_not_frozen};
 
 use crate::args::Language;
 use crate::catalog::Catalog;
