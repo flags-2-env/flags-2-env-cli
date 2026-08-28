@@ -75,6 +75,7 @@ pub fn render_runtime(catalog: &Catalog) -> String {
         "pub fn load_from_os() -> {values} {{\n    load_from(|key| std::env::var(key).ok())\n}}\n"
     ));
     out.push_str(RUST_RUNTIME_HELPERS);
+    out.push_str(&crate::generate::overlay::render_rust(catalog));
     out
 }
 
@@ -186,5 +187,7 @@ default = "127.0.0.1:9090"
         assert!(source.contains("pub fn load_from"));
         assert!(source.contains("pub fn load_from_os"));
         assert!(source.contains("lookup(\"VXL_SIDECAR_BIND\")"));
+        assert!(source.contains("load_env_map"));
+        assert!(source.contains("env_shell"));
     }
 }

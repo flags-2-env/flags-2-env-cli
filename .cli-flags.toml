@@ -3,6 +3,10 @@
 service = "flags-2-env-cli"
 type_name = "CliEnv"
 
+[env]
+files = [".env"]
+load = true
+
 [flags.config]
 env = "FLAGS_2_ENV_CONFIG"
 long = "config"
@@ -18,4 +22,3 @@ env = "FLAGS_2_ENV_JSON"
 long = "json"
 switch = true
 help = "Emit JSON"
-
