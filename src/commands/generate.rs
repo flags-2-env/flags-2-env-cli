@@ -22,20 +22,34 @@ pub fn run(config: &crate::args::GenerateOpts, _runtime: &Config) -> Result<(), 
         fs::create_dir_all(&dir)?;
         let types_path = dir.join(crate::generate::file_name(*language));
         let types_source = crate::generate::render(*language, &catalog);
-        write_if_changed(&types_path, &types_source)?;
+        crate::generate::write_frozen(&types_path, &types_source)?;
         eprintln!("wrote {}", types_path.display());
         let runtime_path = dir.join(crate::generate::runtime_file_name(*language));
         let runtime_source = crate::generate::render_runtime(*language, &catalog);
-        write_if_changed(&runtime_path, &runtime_source)?;
+        crate::generate::write_frozen(&runtime_path, &runtime_source)?;
         eprintln!("wrote {}", runtime_path.display());
         if *language == crate::args::Language::Dart {
             for (name, source) in crate::generate::dart_platform_files() {
                 let path = dir.join(name);
-                write_if_changed(&path, source)?;
+                crate::generate::write_frozen(&path, source)?;
                 eprintln!("wrote {}", path.display());
             }
         }
     }
+    let schema_dir = config.out_dir.join("json-schema");
+    crate::generate::write_frozen(
+        &schema_dir.join("env.os.schema.json"),
+        &crate::generate::render_os_schema(&catalog),
+    )?;
+    crate::generate::write_frozen(
+        &schema_dir.join("env.values.schema.json"),
+        &crate::generate::render_values_schema(&catalog),
+    )?;
+    crate::generate::write_frozen(
+        &config.out_dir.join("README.md"),
+        crate::generate::generated_readme(),
+    )?;
+    eprintln!("wrote {}", schema_dir.join("env.os.schema.json").display());
     if let Some(src_env) = &config.src_env {
         write_src_env(src_env, &config.languages, &catalog)?;
     }
@@ -48,10 +62,10 @@ fn write_src_env(
     catalog: &crate::catalog::Catalog,
 ) -> Result<(), CliError> {
     fs::create_dir_all(src_env)?;
-    write_if_changed(
-        &src_env.join("readme.md"),
-        crate::generate::scaffold_readme(),
-    )?;
+        crate::generate::write_frozen(
+            &src_env.join("readme.md"),
+            crate::generate::scaffold_readme(),
+        )?;
     eprintln!("wrote {}", src_env.join("readme.md").display());
     if languages.contains(&crate::args::Language::Rust) {
         write_if_absent(src_env.join("mod.rs"), crate::generate::scaffold_mod_rs())?;
@@ -59,7 +73,7 @@ fn write_src_env(
     for language in languages {
         let generated = combined_generated(*language, catalog);
         let generated_path = src_env.join(crate::generate::generated_flat_name(*language));
-        write_if_changed(&generated_path, &generated)?;
+        crate::generate::write_frozen(&generated_path, &generated)?;
         eprintln!("wrote {}", generated_path.display());
         if let Some(wrapper) = crate::generate::scaffold_env(*language, catalog) {
             write_if_absent(src_env.join(crate::generate::file_name(*language)), wrapper)?;
@@ -67,7 +81,7 @@ fn write_src_env(
     }
     if languages.contains(&crate::args::Language::Dart) {
         for (name, source) in crate::generate::dart_platform_files() {
-            write_if_changed(&src_env.join(name), source)?;
+            crate::generate::write_frozen(&src_env.join(name), source)?;
             eprintln!("wrote {}", src_env.join(name).display());
         }
     }
@@ -116,16 +130,6 @@ fn strip_inner_attributes(source: &str) -> String {
         .filter(|line| !line.trim_start().starts_with("#!["))
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-fn write_if_changed(path: &Path, source: &str) -> Result<(), CliError> {
-    match fs::read_to_string(path) {
-        Ok(existing) if existing == source => Ok(()),
-        _ => {
-            fs::write(path, source)?;
-            Ok(())
-        }
-    }
 }
 
 fn write_if_absent(path: impl AsRef<Path>, source: impl AsRef<str>) -> Result<(), CliError> {

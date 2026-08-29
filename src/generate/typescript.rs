@@ -73,6 +73,7 @@ pub fn render_runtime(catalog: &Catalog) -> String {
     ));
     out.push_str(TS_RUNTIME_HELPERS);
     out.push_str(&crate::generate::overlay::render_typescript(catalog));
+    out.push_str(&super::checker::render_typescript(catalog));
     out.push_str(&render_try_load(&values, catalog));
     out
 }

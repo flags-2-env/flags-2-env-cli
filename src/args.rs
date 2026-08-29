@@ -39,6 +39,12 @@ pub struct GenerateOpts {
     pub src_env: Option<PathBuf>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CheckContractOpts {
+    pub config: PathBuf,
+    pub json: Option<PathBuf>,
+}
+
 impl GenerateOpts {
     fn defaults() -> Self {
         Self {
@@ -57,6 +63,7 @@ pub enum Command {
     Health,
     Status,
     Generate(GenerateOpts),
+    CheckContract(CheckContractOpts),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -78,6 +85,11 @@ where
             api_base: None,
             json: false,
         }),
+        Command::CheckContract(_) => Ok(Invocation {
+            command: Command::CheckContract(parse_check_contract(&mut items)?),
+            api_base: None,
+            json: false,
+        }),
         command => items.try_fold(
             Invocation {
                 command,
@@ -94,6 +106,13 @@ fn take_command(items: &mut Peekable<impl Iterator<Item = String>>) -> Result<Co
         Some("health") => consume(items, Command::Health),
         Some("status") => consume(items, Command::Status),
         Some("generate") => consume(items, Command::Generate(GenerateOpts::defaults())),
+        Some("check-contract") => consume(
+            items,
+            Command::CheckContract(CheckContractOpts {
+                config: PathBuf::from(".cli-flags.toml"),
+                json: None,
+            }),
+        ),
         Some("-h" | "--help" | "help") => consume(items, Command::Help),
         Some(other) if !other.starts_with('-') => {
             Err(CliError::Usage(format!("unknown command {other}")))
@@ -236,14 +255,50 @@ fn parse_languages(value: &str) -> Result<Vec<Language>, CliError> {
     Ok(unique)
 }
 
+fn parse_check_contract(
+    items: &mut Peekable<impl Iterator<Item = String>>,
+) -> Result<CheckContractOpts, CliError> {
+    let mut opts = CheckContractOpts {
+        config: PathBuf::from(".cli-flags.toml"),
+        json: None,
+    };
+    while let Some(arg) = items.next() {
+        match arg.as_str() {
+            "--config" => {
+                opts.config = required_value("--config", items.next())?.into();
+            }
+            flag if flag.starts_with("--config=") => {
+                opts.config = flag.trim_start_matches("--config=").into();
+            }
+            "--json" => {
+                opts.json = Some(required_value("--json", items.next())?.into());
+            }
+            flag if flag.starts_with("--json=") => {
+                opts.json = Some(flag.trim_start_matches("--json=").into());
+            }
+            other if !other.starts_with('-') => {
+                opts.config = PathBuf::from(other);
+            }
+            other => {
+                return Err(CliError::Usage(format!(
+                    "unknown check-contract flag {other}"
+                )))
+            }
+        }
+    }
+    Ok(opts)
+}
+
 pub fn help_text() -> &'static str {
     "f2e / flags2env-platform — flags-2-env CLI\n\n\
 Commands:\n  \
   health\n  \
   status\n  \
-  generate [config] [--out DIR] [--name TypeName] [--lang rust,dart,typescript,gleam]\n\n\
-generate writes compile-time env key types/interfaces/vars from .cli-flags.toml.\n  \
-  --src-env [DIR]  also scaffold src/env/env.{rs,ts,dart} with .env vs process-env overlay\n"
+  generate [config] [--out DIR] [--name TypeName] [--lang rust,dart,typescript,gleam]\n  \
+  check-contract [config] [--json FILE|-]\n\n\
+generate writes compile-time env key types plus JSON Schema and a runtime checker.\n  \
+  --src-env [DIR]  also scaffold src/env/env.{rs,ts,dart} with .env vs process-env overlay\n\
+check-contract validates a JSON object of env vars against the 2020-12 schema.\n"
 }
 
 #[cfg(test)]

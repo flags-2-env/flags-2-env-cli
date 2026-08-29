@@ -48,7 +48,9 @@ pub fn render_rust(catalog: &Catalog) -> String {
             ));
         }
     }
-    out.push_str("    Ok(out)\n}\n\n");
+    out.push_str(
+        "    match check_os_env(&out) {\n        Ok(()) => Ok(out),\n        Err(errors) => Err(contract_error_to_missing(&errors[0])),\n    }\n}\n\n",
+    );
     out.push_str(
         "/// Effectful overlay: `.env` files then the process environment, ranked per key.\n",
     );
@@ -99,7 +101,9 @@ pub fn render_typescript(catalog: &Catalog) -> String {
             ));
         }
     }
-    out.push_str("  return out;\n}\n\n");
+    out.push_str(
+        "  const contract = checkOsEnv(out);\n  if (contract.length > 0) {\n    const first = contract[0];\n    throw new MissingEnvError({ envKey: first.path, expectedType: \"json-schema-2020-12\", examples: [] });\n  }\n  return out;\n}\n\n",
+    );
     out.push_str(&format!(
         "const DOTENV_FILES: readonly string[] = {};\n",
         ts_files_array(&catalog.env_load.files, catalog.env_load.load)
@@ -146,7 +150,9 @@ pub fn render_dart(catalog: &Catalog) -> String {
             ));
         }
     }
-    out.push_str("  return out;\n}\n\n");
+    out.push_str(
+        "  final contract = checkOsEnv(out);\n  if (contract.isNotEmpty) {\n    throw MissingEnv(name: contract.first.path, expectedType: 'json-schema-2020-12', examples: const <String>[]);\n  }\n  return out;\n}\n\n",
+    );
     out.push_str(&format!(
         "const List<String> _dotenvFiles = {};\n\n",
         dart_files_array(&catalog.env_load.files, catalog.env_load.load)
