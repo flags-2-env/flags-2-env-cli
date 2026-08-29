@@ -14,4 +14,3 @@ fn run() -> Result<(), CliError> {
     let cfg = config::Config::load(&invocation)?;
     commands::dispatch(&cfg, invocation.command)
 }
-

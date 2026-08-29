@@ -55,11 +55,7 @@ pub fn typescript_env(catalog: &Catalog) -> String {
     for flag in &catalog.flags {
         let value = flag.default.as_deref().unwrap_or("");
         if !value.is_empty() {
-            defaults.push_str(&format!(
-                "    {}: \"{}\",\n",
-                flag.env,
-                ts_escape(value)
-            ));
+            defaults.push_str(&format!("    {}: \"{}\",\n", flag.env, ts_escape(value)));
         }
     }
     let mut requires = String::new();
@@ -212,7 +208,15 @@ API_TOKEN = ["env_file", "env_shell", "flags"]
 `FLAGS2ENV_DOTENV=0` can only **disable** file loading, never enable it.
 Servers, MCP processes, and workers should set `[env] load = false` so a
 hostile working-directory `.env` cannot inject values. Those processes take
-deployment values from the real environment (and code defaults).
+deployment values from the real environment (and code defaults). `f2e generate`
+now defaults `[env] load` to false when the table is omitted.
+
+Dotenv paths must be relative `.env` / `.env.*` files (`../` and absolute paths
+are refused). Secret keys (`TOKEN`, `SECRET`, `PASSWORD`, …) never emit catalog
+examples into generated sources, and Rust `Debug` redacts those fields.
+
+`load_from_os()` stays infallible (defaults / `Option`). Use `try_load_from_os()`
+when a `required` key must fail closed.
 
 ## Required values
 
