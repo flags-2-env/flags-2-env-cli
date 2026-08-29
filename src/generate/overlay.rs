@@ -49,7 +49,9 @@ pub fn render_rust(catalog: &Catalog) -> String {
         }
     }
     out.push_str("    Ok(out)\n}\n\n");
-    out.push_str("/// Effectful overlay: `.env` files then the process environment, ranked per key.\n");
+    out.push_str(
+        "/// Effectful overlay: `.env` files then the process environment, ranked per key.\n",
+    );
     out.push_str(&format!(
         "pub fn load_env_map_from_os() -> Result<std::collections::BTreeMap<String, String>, MissingEnv> {{\n    load_env_map(&shell_env(), &load_dotenv_files(&{}), &std::collections::BTreeMap::new())\n}}\n",
         rust_files_array(&catalog.env_load.files, catalog.env_load.load)
@@ -59,12 +61,14 @@ pub fn render_rust(catalog: &Catalog) -> String {
 
 pub fn render_typescript(catalog: &Catalog) -> String {
     let mut out = String::from(TS_HELPERS);
-    out.push_str("export interface MissingEnv {\n  readonly name: string;\n  readonly expectedType: string;\n  readonly examples: readonly string[];\n}\n\n");
+    out.push_str("export interface MissingEnv {\n  readonly envKey: string;\n  readonly expectedType: string;\n  readonly examples: readonly string[];\n}\n\n");
     out.push_str("export class MissingEnvError extends Error implements MissingEnv {\n");
-    out.push_str("  readonly name: string;\n  readonly expectedType: string;\n  readonly examples: readonly string[];\n");
-    out.push_str("  constructor(fields: MissingEnv) {\n    super(`missing required environment variable ${fields.name}\\n  expected type: ${fields.expectedType}\\n  examples: ${fields.examples.join(\", \")}`);\n");
-    out.push_str("    this.name = fields.name;\n    this.expectedType = fields.expectedType;\n    this.examples = fields.examples;\n  }\n}\n\n");
-    out.push_str("/** Resolve env-key -> value. Empty values fall through to the next source. */\n");
+    out.push_str("  readonly envKey: string;\n  readonly expectedType: string;\n  readonly examples: readonly string[];\n");
+    out.push_str("  constructor(fields: MissingEnv) {\n    super(`missing required environment variable ${fields.envKey}\\n  expected type: ${fields.expectedType}\\n  examples: ${fields.examples.join(\", \")}`);\n");
+    out.push_str("    this.name = \"MissingEnvError\";\n    this.envKey = fields.envKey;\n    this.expectedType = fields.expectedType;\n    this.examples = fields.examples;\n  }\n}\n\n");
+    out.push_str(
+        "/** Resolve env-key -> value. Empty values fall through to the next source. */\n",
+    );
     out.push_str("export function loadEnvMap(\n  shell: Record<string, string | undefined>,\n  dotenv: Record<string, string | undefined>,\n  flags: Record<string, string | undefined> = {},\n): Record<string, string> {\n  const out: Record<string, string> = {};\n");
     for flag in &catalog.flags {
         let order = ts_order_array(&catalog.source_order_for(flag));
@@ -108,7 +112,9 @@ pub fn render_typescript(catalog: &Catalog) -> String {
 pub fn render_dart(catalog: &Catalog) -> String {
     let mut out = String::from(DART_HELPERS);
     out.push_str("final class MissingEnv implements Exception {\n  const MissingEnv({required this.name, required this.expectedType, required this.examples});\n");
-    out.push_str("  final String name;\n  final String expectedType;\n  final List<String> examples;\n");
+    out.push_str(
+        "  final String name;\n  final String expectedType;\n  final List<String> examples;\n",
+    );
     out.push_str("  @override\n  String toString() => 'missing required environment variable $name\\n  expected type: $expectedType\\n  examples: ${examples.join(', ')}';\n}\n\n");
     out.push_str("Map<String, String> loadEnvMap(\n  Map<String, String> shell,\n  Map<String, String> dotenv, [\n  Map<String, String> flags = const {},\n]) {\n  final out = <String, String>{};\n");
     for flag in &catalog.flags {
@@ -145,7 +151,7 @@ pub fn render_dart(catalog: &Catalog) -> String {
         "const List<String> _dotenvFiles = {};\n\n",
         dart_files_array(&catalog.env_load.files, catalog.env_load.load)
     ));
-    out.push_str("Map<String, String> loadEnvMapFromOs() {\n  return loadEnvMap(Platform.environment, loadDotenvFiles(_dotenvFiles));\n}\n");
+    out.push_str("Map<String, String> loadEnvMapFromOs() {\n  return loadEnvMap(platform.osEnvironment(), loadDotenvFiles(_dotenvFiles));\n}\n");
     out
 }
 
@@ -357,16 +363,42 @@ fn parse_dotenv(text: &str) -> std::collections::BTreeMap<String, String> {
             continue;
         };
         let key = key.trim();
-        if key.is_empty() {
-            continue;
-        }
-        let first = key.chars().next().unwrap_or('\0');
-        if !(first.is_ascii_alphabetic() || first == '_') {
+        if !is_dotenv_key(key) {
             continue;
         }
         out.insert(key.to_string(), unquote(value));
     }
     out
+}
+
+fn is_dotenv_key(key: &str) -> bool {
+    let mut chars = key.chars();
+    match chars.next() {
+        Some(first) if first.is_ascii_alphabetic() || first == '_' => {
+            chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        }
+        _ => false,
+    }
+}
+
+fn is_safe_dotenv_path(path: &str) -> bool {
+    if path.is_empty() || path.contains('\0') {
+        return false;
+    }
+    let parsed = std::path::Path::new(path);
+    if parsed.is_absolute() {
+        return false;
+    }
+    if parsed
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return false;
+    }
+    matches!(
+        parsed.file_name().and_then(|name| name.to_str()),
+        Some(name) if name == ".env" || name.starts_with(".env.")
+    )
 }
 
 fn dotenv_enabled() -> bool {
@@ -380,12 +412,15 @@ fn load_dotenv_files(files: &[&str]) -> std::collections::BTreeMap<String, Strin
     if !dotenv_enabled() {
         return std::collections::BTreeMap::new();
     }
-    files.iter().fold(std::collections::BTreeMap::new(), |mut acc, path| {
-        if let Ok(text) = std::fs::read_to_string(path) {
-            acc.extend(parse_dotenv(&text));
-        }
-        acc
-    })
+    files.iter().filter(|path| is_safe_dotenv_path(path)).fold(
+        std::collections::BTreeMap::new(),
+        |mut acc, path| {
+            if let Ok(text) = std::fs::read_to_string(path) {
+                acc.extend(parse_dotenv(&text));
+            }
+            acc
+        },
+    )
 }
 
 fn shell_env() -> std::collections::BTreeMap<String, String> {
@@ -409,7 +444,7 @@ export function requireEnv(
   if (trimmed) {
     return trimmed;
   }
-  throw new MissingEnvError({ name, expectedType, examples });
+  throw new MissingEnvError({ envKey: name, expectedType, examples });
 }
 
 function pick(
@@ -469,6 +504,17 @@ function dotenvEnabled(): boolean {
   return !["0", "false", "FALSE", "no", "NO"].includes(value?.trim() ?? "");
 }
 
+function isSafeDotenvPath(path: string): boolean {
+  if (!path || path.includes("\0") || path.includes("..")) {
+    return false;
+  }
+  if (path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path)) {
+    return false;
+  }
+  const base = path.split(/[\\/]/).pop() ?? "";
+  return base === ".env" || base.startsWith(".env.");
+}
+
 export function loadDotenvFiles(files: readonly string[]): Record<string, string> {
   if (!dotenvEnabled() || typeof process === "undefined") {
     return {};
@@ -479,7 +525,7 @@ export function loadDotenvFiles(files: readonly string[]): Record<string, string
   } catch {
     return {};
   }
-  return files.reduce<Record<string, string>>((acc, path) => {
+  return files.filter(isSafeDotenvPath).reduce<Record<string, string>>((acc, path) => {
     try {
       return { ...acc, ...parseDotenv(fs!.readFileSync(path, "utf8")) };
     } catch {
@@ -551,7 +597,7 @@ Map<String, String> parseDotenv(String text) {
       continue;
     }
     final key = line.substring(0, eq).trim();
-    if (key.isEmpty) {
+    if (!RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$').hasMatch(key)) {
       continue;
     }
     out[key] = _unquote(line.substring(eq + 1));
@@ -560,19 +606,65 @@ Map<String, String> parseDotenv(String text) {
 }
 
 bool _dotenvEnabled() {
-  final value = Platform.environment['FLAGS2ENV_DOTENV'];
+  final value = platform.osEnvironment()['FLAGS2ENV_DOTENV'];
   return value != '0' && value != 'false' && value != 'FALSE' && value != 'no' && value != 'NO';
+}
+
+bool _isSafeDotenvPath(String path) {
+  if (path.isEmpty || path.contains('\0') || path.contains('..')) {
+    return false;
+  }
+  if (path.startsWith('/') || RegExp(r'^[A-Za-z]:[\\/]').hasMatch(path)) {
+    return false;
+  }
+  final segments = path.split(RegExp(r'[\\/]'));
+  if (segments.contains('..')) {
+    return false;
+  }
+  final base = segments.isEmpty ? '' : segments.last;
+  return base == '.env' || base.startsWith('.env.');
 }
 
 Map<String, String> loadDotenvFiles(List<String> files) {
   if (!_dotenvEnabled()) {
     return {};
   }
-  return files.fold<Map<String, String>>({}, (acc, path) {
-    try {
-      acc.addAll(parseDotenv(File(path).readAsStringSync()));
-    } catch (_) {}
+  return files.where(_isSafeDotenvPath).fold<Map<String, String>>({}, (acc, path) {
+    final text = platform.readFileUtf8(path);
+    if (text != null) {
+      acc.addAll(parseDotenv(text));
+    }
     return acc;
   });
 }
 "#;
+
+#[cfg(test)]
+mod tests {
+    use crate::catalog::parse_catalog;
+
+    #[test]
+    fn overlay_defaults_to_no_dotenv_files() {
+        let catalog = parse_catalog(
+            r#"
+[flags.bind]
+env = "APP_BIND"
+default = "127.0.0.1:8080"
+"#,
+            None,
+        )
+        .unwrap();
+        let rust = super::render_rust(&catalog);
+        assert!(rust.contains("load_dotenv_files(&[])"));
+        assert!(rust.contains("fn is_safe_dotenv_path"));
+        let ts = super::render_typescript(&catalog);
+        assert!(ts.contains("this.name = \"MissingEnvError\""));
+        assert!(ts.contains("readonly envKey: string"));
+        assert!(!ts.contains("this.name = fields.name"));
+        let dart = super::render_dart(&catalog);
+        assert!(dart.contains("platform.osEnvironment()"));
+        assert!(dart.contains("_isSafeDotenvPath"));
+        assert!(!dart.contains("Platform.environment"));
+        assert!(!dart.contains("File(path)"));
+    }
+}

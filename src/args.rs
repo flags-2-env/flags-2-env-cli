@@ -89,9 +89,7 @@ where
     }
 }
 
-fn take_command(
-    items: &mut Peekable<impl Iterator<Item = String>>,
-) -> Result<Command, CliError> {
+fn take_command(items: &mut Peekable<impl Iterator<Item = String>>) -> Result<Command, CliError> {
     match items.peek().map(String::as_str) {
         Some("health") => consume(items, Command::Health),
         Some("status") => consume(items, Command::Status),
