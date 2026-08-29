@@ -186,6 +186,10 @@ Map<String, String> loadEnvMap(
   if (config != null) out['FLAGS_2_ENV_CONFIG'] = config;
   final json = pick(['FLAGS_2_ENV_JSON'], ['flags', 'env_shell', 'env_file'], shell, dotenv, flags, null);
   if (json != null) out['FLAGS_2_ENV_JSON'] = json;
+  final contract = checkOsEnv(out);
+  if (contract.isNotEmpty) {
+    throw MissingEnv(name: contract.first.path, expectedType: 'json-schema-2020-12', examples: const <String>[]);
+  }
   return out;
 }
 
@@ -194,6 +198,83 @@ const List<String> _dotenvFiles = ['.env'];
 Map<String, String> loadEnvMapFromOs() {
   return loadEnvMap(platform.osEnvironment(), loadDotenvFiles(_dotenvFiles));
 }
+
+class ContractError {
+  const ContractError({required this.path, required this.message});
+  final String path;
+  final String message;
+  @override
+  String toString() => '$path: $message';
+}
+
+/// Validate the resolved env map against the generated JSON Schema rules.
+List<ContractError> checkOsEnv(Map<String, String> env) {
+  final errors = <ContractError>[];
+  {
+    final raw = _nonEmpty(env['FLAGS_2_ENV_API_BASE']);
+    if (raw != null) {
+      final message = _contractCheckString(raw);
+      if (message != null) errors.add(ContractError(path: 'FLAGS_2_ENV_API_BASE', message: message));
+    }
+  }
+  {
+    final raw = _nonEmpty(env['FLAGS_2_ENV_CONFIG']);
+    if (raw != null) {
+      final message = _contractCheckString(raw);
+      if (message != null) errors.add(ContractError(path: 'FLAGS_2_ENV_CONFIG', message: message));
+    }
+  }
+  {
+    final raw = _nonEmpty(env['FLAGS_2_ENV_JSON']);
+    if (raw != null) {
+      final message = _contractCheckBool(raw);
+      if (message != null) errors.add(ContractError(path: 'FLAGS_2_ENV_JSON', message: message));
+    }
+  }
+  for (final key in env.keys) {
+    if (!_knownEnvKeys.contains(key)) {
+      errors.add(ContractError(path: key, message: 'additional property not in the env contract'));
+    }
+  }
+  return errors;
+}
+
+void assertOsEnv(Map<String, String> env) {
+  final errors = checkOsEnv(env);
+  if (errors.isNotEmpty) {
+    throw StateError('environment contract violated: ${errors.join('; ')}');
+  }
+}
+
+const _knownEnvKeys = <String>{'FLAGS_2_ENV_API_BASE', 'FLAGS_2_ENV_CONFIG', 'FLAGS_2_ENV_JSON', };
+
+String? _contractCheckString(String raw) => raw.isEmpty ? 'empty string' : null;
+String? _contractCheckBool(String raw) {
+  switch (raw) {
+    case '0':
+    case '1':
+    case 'true':
+    case 'false':
+    case 'TRUE':
+    case 'FALSE':
+    case 'yes':
+    case 'no':
+    case 'YES':
+    case 'NO':
+      return null;
+    default:
+      return 'not a bool env token: $raw';
+  }
+}
+String? _contractCheckInt(String raw) => int.tryParse(raw) == null ? 'not an int: $raw' : null;
+String? _contractCheckFloat(String raw) => double.tryParse(raw) == null ? 'not a float: $raw' : null;
+String? _contractCheckJson(String raw) {
+  final trimmed = raw.trim();
+  final ok = (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+      (trimmed.startsWith('[') && trimmed.endsWith(']'));
+  return ok ? null : 'expected JSON object or array string';
+}
+
 
 /// Like `loadFrom`, but throws when a required key is missing or empty.
 CliEnvValues tryLoadFrom(String? Function(String key) lookup) {

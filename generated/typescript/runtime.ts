@@ -201,6 +201,11 @@ export function loadEnvMap(
   if (config !== undefined) out["FLAGS_2_ENV_CONFIG"] = config;
   const json = pick(["FLAGS_2_ENV_JSON"], ["flags", "env_shell", "env_file"], shell, dotenv, flags, undefined);
   if (json !== undefined) out["FLAGS_2_ENV_JSON"] = json;
+  const contract = checkOsEnv(out);
+  if (contract.length > 0) {
+    const first = contract[0];
+    throw new MissingEnvError({ envKey: first.path, expectedType: "json-schema-2020-12", examples: [] });
+  }
   return out;
 }
 
@@ -211,6 +216,90 @@ export function loadEnvMapFromOs(
 ): Record<string, string> {
   return loadEnvMap(shell, loadDotenvFiles(DOTENV_FILES), {});
 }
+
+export interface ContractError {
+  readonly path: string;
+  readonly message: string;
+}
+
+/** Validate the resolved env map against the generated JSON Schema rules. */
+export function checkOsEnv(env: Record<string, string>): ContractError[] {
+  const errors: ContractError[] = [];
+  {
+    const raw = nonEmpty(env["FLAGS_2_ENV_API_BASE"]);
+    if (raw !== undefined) {
+      const message = contractCheckString(raw);
+      if (message) errors.push({ path: "FLAGS_2_ENV_API_BASE", message });
+    }
+  }
+  {
+    const raw = nonEmpty(env["FLAGS_2_ENV_CONFIG"]);
+    if (raw !== undefined) {
+      const message = contractCheckString(raw);
+      if (message) errors.push({ path: "FLAGS_2_ENV_CONFIG", message });
+    }
+  }
+  {
+    const raw = nonEmpty(env["FLAGS_2_ENV_JSON"]);
+    if (raw !== undefined) {
+      const message = contractCheckBool(raw);
+      if (message) errors.push({ path: "FLAGS_2_ENV_JSON", message });
+    }
+  }
+  for (const key of Object.keys(env)) {
+    if (!KNOWN_ENV_KEYS.includes(key)) {
+      errors.push({ path: key, message: "additional property not in the env contract" });
+    }
+  }
+  return errors;
+}
+
+export function assertOsEnv(env: Record<string, string>): void {
+  const errors = checkOsEnv(env);
+  if (errors.length > 0) {
+    throw new Error(`environment contract violated: ${errors.map((error) => `${error.path}: ${error.message}`).join("; ")}`);
+  }
+}
+
+const KNOWN_ENV_KEYS: readonly string[] = ["FLAGS_2_ENV_API_BASE", "FLAGS_2_ENV_CONFIG", "FLAGS_2_ENV_JSON", ];
+
+function contractCheckString(raw: string): string | undefined {
+  return raw.length === 0 ? "empty string" : undefined;
+}
+function contractCheckBool(raw: string): string | undefined {
+  switch (raw) {
+    case "0":
+    case "1":
+    case "true":
+    case "false":
+    case "TRUE":
+    case "FALSE":
+    case "yes":
+    case "no":
+    case "YES":
+    case "NO":
+      return undefined;
+    default:
+      return `not a bool env token: ${raw}`;
+  }
+}
+function contractCheckInt(raw: string): string | undefined {
+  return /^-?[0-9]+$/.test(raw) ? undefined : `not an int: ${raw}`;
+}
+function contractCheckFloat(raw: string): string | undefined {
+  return Number.isNaN(Number.parseFloat(raw)) ? `not a float: ${raw}` : undefined;
+}
+function contractCheckJson(raw: string): string | undefined {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object") return undefined;
+    return "expected JSON object or array string";
+  } catch {
+    return "expected JSON object or array string";
+  }
+}
+
+export const OS_ENV_SCHEMA = {"$id":"https://github.com/flags-2-env/flags-2-env-cli/generated/json-schema/flags-2-env-cli/env.os.schema.json","$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"description":"Resolved environment map for CliEnv after flags-2-env overlay (flags > env_shell > env_file unless reordered). Values are still strings, as the OS stores them. Validate this object at runtime with `check_os_env` or `f2e check-contract`; do not hand-edit generated sources.","properties":{"FLAGS_2_ENV_API_BASE":{"description":"API HTTP base URL","examples":["http://127.0.0.1:8080","https://api.example.test"],"minLength":1,"type":"string","x-env-key":"FLAGS_2_ENV_API_BASE","x-flag-type":"string"},"FLAGS_2_ENV_CONFIG":{"description":"Path to TOML configuration","examples":["example-value"],"minLength":1,"type":"string","x-env-key":"FLAGS_2_ENV_CONFIG","x-flag-type":"string"},"FLAGS_2_ENV_JSON":{"description":"Emit JSON","enum":["0","1","true","false","TRUE","FALSE","yes","no","YES","NO"],"examples":["true","false","1","0"],"minLength":1,"type":"string","x-env-key":"FLAGS_2_ENV_JSON","x-flag-type":"bool"}},"title":"CliEnv resolved environment","type":"object","x-flags-2-env":{"generator":"flags-2-env","service":"flags-2-env-cli","typeName":"CliEnv"}} as const;
 
 /** Like `loadFrom`, but throws when a required key is missing or empty. */
 export function tryLoadFrom(lookup: (key: string) => string | undefined): CliEnvValues {

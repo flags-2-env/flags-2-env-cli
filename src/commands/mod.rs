@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod check_contract;
 pub mod generate;
 pub mod health;
 pub mod status;
@@ -17,5 +18,6 @@ pub fn dispatch(config: &Config, command: Command) -> Result<(), CliError> {
         Command::Health => health::run(config),
         Command::Status => status::run(config),
         Command::Generate(opts) => generate::run(&opts, config),
+        Command::CheckContract(opts) => check_contract::run(&opts, config),
     }
 }
