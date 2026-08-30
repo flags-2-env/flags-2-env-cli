@@ -28,11 +28,7 @@ pub fn check_os_map(
 }
 
 pub fn check_values_json(catalog: &Catalog, instance: &Value) -> Result<(), Vec<ContractFailure>> {
-    validate_instance(
-        &values_schema(catalog),
-        instance,
-        "env.values.schema.json",
-    )
+    validate_instance(&values_schema(catalog), instance, "env.values.schema.json")
 }
 
 fn validate_instance(

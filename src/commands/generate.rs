@@ -62,10 +62,10 @@ fn write_src_env(
     catalog: &crate::catalog::Catalog,
 ) -> Result<(), CliError> {
     fs::create_dir_all(src_env)?;
-        crate::generate::write_frozen(
-            &src_env.join("readme.md"),
-            crate::generate::scaffold_readme(),
-        )?;
+    crate::generate::write_frozen(
+        &src_env.join("readme.md"),
+        crate::generate::scaffold_readme(),
+    )?;
     eprintln!("wrote {}", src_env.join("readme.md").display());
     if languages.contains(&crate::args::Language::Rust) {
         write_if_absent(src_env.join("mod.rs"), crate::generate::scaffold_mod_rs())?;
@@ -99,7 +99,9 @@ fn combined_generated(
             format!("{types}\n{}\n", strip_inner_attributes(&runtime))
         }
         crate::args::Language::Dart => hoist_dart_imports(&types, &runtime),
-        _ => format!("{types}\n{runtime}\n"),
+        crate::args::Language::TypeScript | crate::args::Language::Gleam => {
+            format!("{types}\n{runtime}\n")
+        }
     }
 }
 

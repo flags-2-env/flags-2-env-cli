@@ -56,14 +56,6 @@ bool _parseBool(String? raw, bool fallback) {
   }
 }
 
-int _parseInt(String? raw, int fallback) {
-  return int.tryParse(raw?.trim() ?? '') ?? fallback;
-}
-
-double _parseDouble(String? raw, double fallback) {
-  return double.tryParse(raw?.trim() ?? '') ?? fallback;
-}
-
 String? _nonempty(String? raw) {
   final value = raw?.trim();
   if (value == null || value.isEmpty) {
@@ -249,6 +241,7 @@ void assertOsEnv(Map<String, String> env) {
 const _knownEnvKeys = <String>{'FLAGS_2_ENV_API_BASE', 'FLAGS_2_ENV_CONFIG', 'FLAGS_2_ENV_JSON', };
 
 String? _contractCheckString(String raw) => raw.isEmpty ? 'empty string' : null;
+
 String? _contractCheckBool(String raw) {
   switch (raw) {
     case '0':
@@ -266,15 +259,6 @@ String? _contractCheckBool(String raw) {
       return 'not a bool env token: $raw';
   }
 }
-String? _contractCheckInt(String raw) => int.tryParse(raw) == null ? 'not an int: $raw' : null;
-String? _contractCheckFloat(String raw) => double.tryParse(raw) == null ? 'not a float: $raw' : null;
-String? _contractCheckJson(String raw) {
-  final trimmed = raw.trim();
-  final ok = (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
-      (trimmed.startsWith('[') && trimmed.endsWith(']'));
-  return ok ? null : 'expected JSON object or array string';
-}
-
 
 /// Like `loadFrom`, but throws when a required key is missing or empty.
 CliEnvValues tryLoadFrom(String? Function(String key) lookup) {

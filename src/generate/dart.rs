@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use crate::catalog::{to_pascal, Catalog};
+use crate::catalog::{to_pascal, Catalog, FlagType};
 
 pub fn render(catalog: &Catalog) -> String {
     let type_name = to_pascal(&catalog.type_name);
@@ -75,7 +75,28 @@ pub fn render_runtime(catalog: &Catalog) -> String {
     out.push_str(&format!(
         "{values} loadFromOs() {{\n  return loadFromMap(platform.osEnvironment());\n}}\n"
     ));
-    out.push_str(DART_RUNTIME_HELPERS);
+    out.push_str(DART_NON_EMPTY_HELPER);
+    if catalog
+        .flags
+        .iter()
+        .any(|flag| flag.flag_type == FlagType::Bool)
+    {
+        out.push_str(DART_BOOL_HELPER);
+    }
+    if catalog
+        .flags
+        .iter()
+        .any(|flag| flag.flag_type == FlagType::Int)
+    {
+        out.push_str(DART_INT_HELPER);
+    }
+    if catalog
+        .flags
+        .iter()
+        .any(|flag| flag.flag_type == FlagType::Float)
+    {
+        out.push_str(DART_DOUBLE_HELPER);
+    }
     out.push_str(&crate::generate::overlay::render_dart(catalog));
     out.push_str(&super::checker::render_dart(catalog));
     out.push_str(&render_try_load(&values, catalog));
@@ -117,12 +138,12 @@ fn dart_try_examples(flag: &crate::catalog::FlagSpec) -> String {
     )
 }
 
-fn dart_owned_type(flag_type: &str, has_default: bool) -> String {
+fn dart_owned_type(flag_type: &FlagType, has_default: bool) -> String {
     let inner = match flag_type {
-        "bool" => "bool",
-        "int" => "int",
-        "float" => "double",
-        _ => "String",
+        FlagType::Bool => "bool",
+        FlagType::Int => "int",
+        FlagType::Float => "double",
+        FlagType::Array | FlagType::Map | FlagType::Json | FlagType::String => "String",
     };
     if has_default {
         inner.to_string()
@@ -133,8 +154,8 @@ fn dart_owned_type(flag_type: &str, has_default: bool) -> String {
 
 fn dart_load_expr(flag: &crate::catalog::FlagSpec) -> String {
     let key = format!("'{}'", dart_escape(&flag.env));
-    match (flag.flag_type.as_str(), flag.default.as_deref()) {
-        ("bool", Some(default)) => format!(
+    match (flag.flag_type, flag.default.as_deref()) {
+        (FlagType::Bool, Some(default)) => format!(
             "_parseBool(lookup({key}), {})",
             if default == "true" || default == "1" {
                 "true"
@@ -142,25 +163,30 @@ fn dart_load_expr(flag: &crate::catalog::FlagSpec) -> String {
                 "false"
             }
         ),
-        ("bool", None) => format!(
+        (FlagType::Bool, None) => format!(
             "() {{ final raw = lookup({key}); return raw == null ? null : _parseBool(raw, false); }}()"
         ),
-        ("int", Some(default)) => format!(
+        (FlagType::Int, Some(default)) => format!(
             "_parseInt(lookup({key}), {})",
             default.parse::<i64>().unwrap_or(0)
         ),
-        ("int", None) => format!("int.tryParse(lookup({key}) ?? '')"),
-        ("float", Some(default)) => format!(
+        (FlagType::Int, None) => format!("int.tryParse(lookup({key}) ?? '')"),
+        (FlagType::Float, Some(default)) => format!(
             "_parseDouble(lookup({key}), {})",
             default.parse::<f64>().unwrap_or(0.0)
         ),
-        ("float", None) => format!("double.tryParse(lookup({key}) ?? '')"),
-        (_, Some(default)) => format!("_nonEmpty(lookup({key})) ?? '{}'", dart_escape(default)),
-        (_, None) => format!("_nonEmpty(lookup({key}))"),
+        (FlagType::Float, None) => format!("double.tryParse(lookup({key}) ?? '')"),
+        (
+            FlagType::Array | FlagType::Map | FlagType::Json | FlagType::String,
+            Some(default),
+        ) => format!("_nonEmpty(lookup({key})) ?? '{}'", dart_escape(default)),
+        (FlagType::Array | FlagType::Map | FlagType::Json | FlagType::String, None) => {
+            format!("_nonEmpty(lookup({key}))")
+        }
     }
 }
 
-const DART_RUNTIME_HELPERS: &str = r#"
+const DART_NON_EMPTY_HELPER: &str = r#"
 String? _nonEmpty(String? raw) {
   final value = raw?.trim();
   if (value == null || value.isEmpty) {
@@ -168,7 +194,9 @@ String? _nonEmpty(String? raw) {
   }
   return value;
 }
+"#;
 
+const DART_BOOL_HELPER: &str = r#"
 bool _parseBool(String? raw, bool fallback) {
   switch (raw?.trim()) {
     case '1':
@@ -187,11 +215,15 @@ bool _parseBool(String? raw, bool fallback) {
       return fallback;
   }
 }
+"#;
 
+const DART_INT_HELPER: &str = r#"
 int _parseInt(String? raw, int fallback) {
   return int.tryParse(raw?.trim() ?? '') ?? fallback;
 }
+"#;
 
+const DART_DOUBLE_HELPER: &str = r#"
 double _parseDouble(String? raw, double fallback) {
   return double.tryParse(raw?.trim() ?? '') ?? fallback;
 }
@@ -289,5 +321,13 @@ default = "127.0.0.1:9090"
             .contains("import 'env_io_stub.dart' if (dart.library.io) 'env_io.dart' as platform;"));
         assert!(!source.contains("import 'dart:io';"));
         assert!(source.contains("platform.osEnvironment()"));
+        assert!(source.contains("_contractCheckString"));
+        assert!(!source.contains("_parseBool"));
+        assert!(!source.contains("_parseInt"));
+        assert!(!source.contains("_parseDouble"));
+        assert!(!source.contains("_contractCheckBool"));
+        assert!(!source.contains("_contractCheckInt"));
+        assert!(!source.contains("_contractCheckFloat"));
+        assert!(!source.contains("_contractCheckJson"));
     }
 }

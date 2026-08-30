@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use crate::catalog::{to_pascal, Catalog};
+use crate::catalog::{to_pascal, Catalog, FlagType};
 
 pub fn render(catalog: &Catalog) -> String {
     let type_name = to_pascal(&catalog.type_name);
@@ -106,13 +106,13 @@ fn nonempty_or(raw: Option(String), fallback: String) -> String {
 }
 "#;
 
-fn gleam_value_type(flag_type: &str) -> &'static str {
+fn gleam_value_type(flag_type: &FlagType) -> &'static str {
     match flag_type {
-        "bool" => "Bool",
-        "int" => "Int",
-        "float" => "Float",
-        "array" => "List(String)",
-        _ => "String",
+        FlagType::Bool => "Bool",
+        FlagType::Int => "Int",
+        FlagType::Float => "Float",
+        FlagType::Array => "List(String)",
+        FlagType::Map | FlagType::Json | FlagType::String => "String",
     }
 }
 

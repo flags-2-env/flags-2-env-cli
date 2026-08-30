@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use crate::catalog::Catalog;
+use crate::catalog::{Catalog, FlagType};
 
 pub fn render(catalog: &Catalog) -> String {
     let mut out =
@@ -115,8 +115,8 @@ fn ts_try_examples(flag: &crate::catalog::FlagSpec) -> String {
 
 fn ts_load_expr(flag: &crate::catalog::FlagSpec) -> String {
     let key = format!("\"{}\"", ts_escape(&flag.env));
-    match (flag.flag_type.as_str(), flag.default.as_deref()) {
-        ("bool", Some(default)) => format!(
+    match (flag.flag_type, flag.default.as_deref()) {
+        (FlagType::Bool, Some(default)) => format!(
             "parseBool(lookup({key}), {})",
             if default == "true" || default == "1" {
                 "true"
@@ -124,21 +124,26 @@ fn ts_load_expr(flag: &crate::catalog::FlagSpec) -> String {
                 "false"
             }
         ),
-        ("bool", None) => format!(
+        (FlagType::Bool, None) => format!(
             "(() => {{ const raw = lookup({key}); return raw === undefined ? undefined : parseBool(raw, false); }})()"
         ),
-        ("int", Some(default)) => format!(
+        (FlagType::Int, Some(default)) => format!(
             "parseIntValue(lookup({key}), {})",
             default.parse::<i64>().unwrap_or(0)
         ),
-        ("int", None) => format!("parseOptionalNumber(lookup({key}), true)"),
-        ("float", Some(default)) => format!(
+        (FlagType::Int, None) => format!("parseOptionalNumber(lookup({key}), true)"),
+        (FlagType::Float, Some(default)) => format!(
             "parseFloatValue(lookup({key}), {})",
             default.parse::<f64>().unwrap_or(0.0)
         ),
-        ("float", None) => format!("parseOptionalNumber(lookup({key}), false)"),
-        (_, Some(default)) => format!("nonEmpty(lookup({key})) ?? \"{}\"", ts_escape(default)),
-        (_, None) => format!("nonEmpty(lookup({key}))"),
+        (FlagType::Float, None) => format!("parseOptionalNumber(lookup({key}), false)"),
+        (
+            FlagType::Array | FlagType::Map | FlagType::Json | FlagType::String,
+            Some(default),
+        ) => format!("nonEmpty(lookup({key})) ?? \"{}\"", ts_escape(default)),
+        (FlagType::Array | FlagType::Map | FlagType::Json | FlagType::String, None) => {
+            format!("nonEmpty(lookup({key}))")
+        }
     }
 }
 
@@ -187,13 +192,13 @@ function parseOptionalNumber(raw: string | undefined, asInt: boolean): number | 
 }
 "#;
 
-fn ts_value_type(flag_type: &str) -> &'static str {
+fn ts_value_type(flag_type: &FlagType) -> &'static str {
     match flag_type {
-        "bool" => "boolean",
-        "int" | "float" => "number",
-        "array" => "ReadonlyArray<unknown>",
-        "map" | "json" => "Readonly<Record<string, unknown>>",
-        _ => "string",
+        FlagType::Bool => "boolean",
+        FlagType::Int | FlagType::Float => "number",
+        FlagType::Array => "ReadonlyArray<unknown>",
+        FlagType::Map | FlagType::Json => "Readonly<Record<string, unknown>>",
+        FlagType::String => "string",
     }
 }
 
