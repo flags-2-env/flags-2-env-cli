@@ -13,6 +13,8 @@ pub enum Language {
 }
 
 impl Language {
+    pub const ALL: [Self; 4] = [Self::Rust, Self::Dart, Self::TypeScript, Self::Gleam];
+
     pub fn parse(value: &str) -> Result<Self, CliError> {
         match value.trim().to_ascii_lowercase().as_str() {
             "rust" | "rs" => Ok(Self::Rust),
@@ -26,7 +28,7 @@ impl Language {
     }
 
     pub fn all() -> Vec<Self> {
-        vec![Self::Rust, Self::Dart, Self::TypeScript, Self::Gleam]
+        Self::ALL.to_vec()
     }
 }
 
@@ -90,7 +92,7 @@ where
             api_base: None,
             json: false,
         }),
-        command => items.try_fold(
+        command @ (Command::Help | Command::Health | Command::Status) => items.try_fold(
             Invocation {
                 command,
                 api_base: None,
@@ -350,52 +352,43 @@ mod tests {
     #[test]
     fn generate_defaults_cover_all_languages() {
         let invocation = parse(["generate".into()]).expect("parse");
-        match invocation.command {
-            Command::Generate(opts) => {
-                assert_eq!(opts.config.as_os_str(), ".cli-flags.toml");
-                assert_eq!(opts.out_dir.as_os_str(), "generated");
-                assert_eq!(opts.type_name, "CliEnv");
-                assert_eq!(opts.languages, Language::all());
-            }
-            other => panic!("expected generate, got {other:?}"),
-        }
+        let Command::Generate(opts) = invocation.command else {
+            panic!("expected generate");
+        };
+        assert_eq!(opts.config.as_os_str(), ".cli-flags.toml");
+        assert_eq!(opts.out_dir.as_os_str(), "generated");
+        assert_eq!(opts.type_name, "CliEnv");
+        assert_eq!(opts.languages, Language::all());
     }
 
     #[test]
     fn generate_accepts_positional_config_and_lang_subset() {
-        let invocation = parse(
-            [
-                "generate".into(),
-                "flags.toml".into(),
-                "--name".into(),
-                "SidecarEnv".into(),
-                "--lang=rust,gleam".into(),
-            ]
-            .into_iter(),
-        )
+        let invocation = parse([
+            "generate".into(),
+            "flags.toml".into(),
+            "--name".into(),
+            "SidecarEnv".into(),
+            "--lang=rust,gleam".into(),
+        ])
         .expect("parse");
-        match invocation.command {
-            Command::Generate(opts) => {
-                assert_eq!(opts.config.as_os_str(), "flags.toml");
-                assert_eq!(opts.type_name, "SidecarEnv");
-                assert_eq!(opts.languages, vec![Language::Rust, Language::Gleam]);
-                assert_eq!(opts.src_env, None);
-            }
-            other => panic!("expected generate, got {other:?}"),
-        }
+        let Command::Generate(opts) = invocation.command else {
+            panic!("expected generate");
+        };
+        assert_eq!(opts.config.as_os_str(), "flags.toml");
+        assert_eq!(opts.type_name, "SidecarEnv");
+        assert_eq!(opts.languages, vec![Language::Rust, Language::Gleam]);
+        assert_eq!(opts.src_env, None);
     }
 
     #[test]
     fn generate_src_env_defaults_to_src_env() {
         let invocation = parse(["generate".into(), "--src-env".into()]).expect("parse");
-        match invocation.command {
-            Command::Generate(opts) => {
-                assert_eq!(
-                    opts.src_env.as_deref().map(|path| path.as_os_str()),
-                    Some(std::ffi::OsStr::new("src/env"))
-                );
-            }
-            other => panic!("expected generate, got {other:?}"),
-        }
+        let Command::Generate(opts) = invocation.command else {
+            panic!("expected generate");
+        };
+        assert_eq!(
+            opts.src_env.as_deref().map(|path| path.as_os_str()),
+            Some(std::ffi::OsStr::new("src/env"))
+        );
     }
 }

@@ -1,6 +1,53 @@
 #![forbid(unsafe_code)]
 
 use crate::error::CliError;
+use std::fmt;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FlagType {
+    Bool,
+    Int,
+    Float,
+    Array,
+    Map,
+    Json,
+    String,
+}
+
+impl FlagType {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Bool => "bool",
+            Self::Int => "int",
+            Self::Float => "float",
+            Self::Array => "array",
+            Self::Map => "map",
+            Self::Json => "json",
+            Self::String => "string",
+        }
+    }
+
+    fn parse(value: &str) -> Result<Self, CliError> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "bool" | "boolean" => Ok(Self::Bool),
+            "int" | "integer" => Ok(Self::Int),
+            "float" | "number" | "double" => Ok(Self::Float),
+            "array" => Ok(Self::Array),
+            "map" | "object" => Ok(Self::Map),
+            "json" => Ok(Self::Json),
+            "string" => Ok(Self::String),
+            unsupported => Err(CliError::Config(format!(
+                "unsupported flag type {unsupported}; expected bool, int, float, array, map, json, or string"
+            ))),
+        }
+    }
+}
+
+impl fmt::Display for FlagType {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FlagSpec {
@@ -8,7 +55,7 @@ pub struct FlagSpec {
     pub env: String,
     pub rust_const: String,
     pub snake: String,
-    pub flag_type: String,
+    pub flag_type: FlagType,
     pub default: Option<String>,
     pub help: Option<String>,
     pub required: bool,
@@ -227,18 +274,22 @@ fn flag_from_table(name: &str, table: &toml::Table) -> Result<FlagSpec, CliError
     let raw_snake = to_snake(name);
     let rust_const = raw_snake.to_ascii_uppercase();
     let snake = sanitize_field_ident(&raw_snake);
-    let flag_type = table
-        .get("type")
-        .and_then(|value| value.as_str())
-        .map(normalize_type)
-        .or_else(|| {
-            table
-                .get("switch")
-                .and_then(|value| value.as_bool())
-                .filter(|value| *value)
-                .map(|_| "bool".to_string())
-        })
-        .unwrap_or_else(|| "string".to_string());
+    let flag_type = match table.get("type") {
+        Some(toml::Value::String(value)) => FlagType::parse(value)?,
+        Some(_) => {
+            return Err(CliError::Config(format!(
+                "flag {name} type must be a string"
+            )))
+        }
+        None if table
+            .get("switch")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false) =>
+        {
+            FlagType::Bool
+        }
+        None => FlagType::String,
+    };
     let default = table.get("default").and_then(toml_to_string);
     let help = table
         .get("help")
@@ -277,7 +328,11 @@ fn toml_string_list(value: &toml::Value) -> Vec<String> {
     match value {
         toml::Value::String(text) => vec![text.clone()],
         toml::Value::Array(items) => items.iter().filter_map(toml_to_string).collect(),
-        _ => Vec::new(),
+        toml::Value::Integer(_)
+        | toml::Value::Float(_)
+        | toml::Value::Boolean(_)
+        | toml::Value::Datetime(_)
+        | toml::Value::Table(_) => Vec::new(),
     }
 }
 
@@ -287,19 +342,7 @@ fn toml_to_string(value: &toml::Value) -> Option<String> {
         toml::Value::Boolean(flag) => Some(flag.to_string()),
         toml::Value::Integer(number) => Some(number.to_string()),
         toml::Value::Float(number) => Some(number.to_string()),
-        _ => None,
-    }
-}
-
-fn normalize_type(value: &str) -> String {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "bool" | "boolean" => "bool".into(),
-        "int" | "integer" => "int".into(),
-        "float" | "number" => "float".into(),
-        "array" => "array".into(),
-        "map" | "object" => "map".into(),
-        "json" => "json".into(),
-        _ => "string".into(),
+        toml::Value::Datetime(_) | toml::Value::Array(_) | toml::Value::Table(_) => None,
     }
 }
 
@@ -370,23 +413,26 @@ pub fn example_values(flag: &FlagSpec) -> Vec<String> {
     if !flag.examples.is_empty() {
         return flag.examples.clone();
     }
-    match flag.flag_type.as_str() {
-        "bool" => vec!["true".into(), "false".into(), "1".into(), "0".into()],
-        "int" => vec!["8080".into(), "0".into()],
-        "float" => vec!["1.0".into(), "0.5".into()],
-        _ if flag.env.contains("URL")
-            || flag.env.contains("BASE")
-            || flag.env.contains("ORIGIN") =>
+    match flag.flag_type {
+        FlagType::Bool => vec!["true".into(), "false".into(), "1".into(), "0".into()],
+        FlagType::Int => vec!["8080".into(), "0".into()],
+        FlagType::Float => vec!["1.0".into(), "0.5".into()],
+        FlagType::String
+            if flag.env.contains("URL")
+                || flag.env.contains("BASE")
+                || flag.env.contains("ORIGIN") =>
         {
             vec![
                 "http://127.0.0.1:8080".into(),
                 "https://api.example.test".into(),
             ]
         }
-        _ if flag.env.contains("BIND") || flag.env.contains("LISTEN") => {
+        FlagType::String if flag.env.contains("BIND") || flag.env.contains("LISTEN") => {
             vec!["127.0.0.1:8080".into(), "0.0.0.0:8080".into()]
         }
-        _ => vec!["example-value".into()],
+        FlagType::Array => vec!["one,two".into()],
+        FlagType::Map | FlagType::Json => vec![r#"{"key":"value"}"#.into()],
+        FlagType::String => vec!["example-value".into()],
     }
 }
 
@@ -395,7 +441,7 @@ pub fn is_secret_env(env: &str) -> bool {
     if upper.contains("PRIVATE_KEY") || upper.contains("ACCESS_KEY") || upper.contains("API_KEY") {
         return true;
     }
-    upper.split(|ch| ch == '_' || ch == '-').any(|part| {
+    upper.split(['_', '-']).any(|part| {
         matches!(
             part,
             "TOKEN" | "SECRET" | "PASSWORD" | "PASSWD" | "CREDENTIAL" | "PASSPHRASE"
@@ -564,7 +610,7 @@ fn is_ident_start(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_catalog, to_pascal, to_snake};
+    use super::{parse_catalog, to_pascal, to_snake, FlagType};
 
     #[test]
     fn snake_and_pascal_split_hyphens_and_case() {
@@ -595,9 +641,48 @@ help = "HTTP listen address"
         assert_eq!(catalog.flags.len(), 1);
         assert_eq!(catalog.flags[0].env, "VXL_SIDECAR_BIND");
         assert_eq!(catalog.flags[0].rust_const, "BIND");
+        assert_eq!(catalog.flags[0].flag_type, FlagType::String);
         assert_eq!(catalog.flags[0].default.as_deref(), Some("127.0.0.1:9090"));
         assert!(!catalog.env_load.load);
         assert!(catalog.env_load.files.is_empty());
+    }
+
+    #[test]
+    fn catalog_normalizes_supported_types_and_rejects_unknown_types() {
+        let catalog = parse_catalog(
+            r#"
+[flags.ratio]
+env = "APP_RATIO"
+type = "double"
+"#,
+            None,
+        )
+        .expect("catalog");
+        assert_eq!(catalog.flags[0].flag_type, FlagType::Float);
+
+        let error = parse_catalog(
+            r#"
+[flags.ratio]
+env = "APP_RATIO"
+type = "decimal128"
+"#,
+            None,
+        )
+        .expect_err("unsupported types must fail closed");
+        assert!(error
+            .to_string()
+            .contains("unsupported flag type decimal128"));
+
+        let error = parse_catalog(
+            r#"
+[flags.ratio]
+env = "APP_RATIO"
+type = 128
+"#,
+            None,
+        )
+        .expect_err("non-string types must not be treated as omitted");
+        assert!(error.to_string().contains("type must be a string"));
     }
 
     #[test]
@@ -640,7 +725,7 @@ dotenv_override = true
         .expect("catalog");
         assert!(catalog.env_load.load);
         assert_eq!(catalog.env_load.files, vec![".env", ".env.local"]);
-        assert_eq!(catalog.flags[0].required, true);
+        assert!(catalog.flags[0].required);
         assert_eq!(
             catalog.flags[0].examples,
             vec!["tok_live_123", "tok_test_abc"]

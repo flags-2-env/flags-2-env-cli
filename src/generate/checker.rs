@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use crate::catalog::{example_values, Catalog};
+use crate::catalog::{example_values, Catalog, FlagType};
 use crate::generate::json_schema::{os_schema, render_os_schema, render_values_schema};
 
 /// Dependency-free contract checker emitted into generated runtimes.
@@ -65,7 +65,7 @@ fn contract_error_to_missing(error: &ContractError) -> MissingEnv {
         out.push_str(&format!(
             "        \"{env}\" => MissingEnv {{ name: \"{env}\", expected_type: \"{ty}\", examples: {examples} }},\n",
             env = rust_escape(&flag.env),
-            ty = rust_escape(&flag.flag_type),
+            ty = rust_escape(flag.flag_type.as_str()),
             examples = examples,
         ));
     }
@@ -195,7 +195,29 @@ List<ContractError> checkOsEnv(Map<String, String> env) {
         out.push_str(&format!("'{}', ", dart_escape(&flag.env)));
     }
     out.push_str("};\n");
-    out.push_str(DART_TYPE_CHECKS);
+    out.push_str(&render_dart_type_checks(catalog));
+    out
+}
+
+fn render_dart_type_checks(catalog: &Catalog) -> String {
+    let mut out = String::new();
+    let has = |expected| catalog.flags.iter().any(|flag| flag.flag_type == expected);
+
+    if has(FlagType::String) {
+        out.push_str(DART_STRING_CHECK);
+    }
+    if has(FlagType::Bool) {
+        out.push_str(DART_BOOL_CHECK);
+    }
+    if has(FlagType::Int) {
+        out.push_str(DART_INT_CHECK);
+    }
+    if has(FlagType::Float) {
+        out.push_str(DART_FLOAT_CHECK);
+    }
+    if has(FlagType::Array) || has(FlagType::Map) || has(FlagType::Json) {
+        out.push_str(DART_JSON_CHECK);
+    }
     out
 }
 
@@ -210,33 +232,33 @@ fn rust_examples(flag: &crate::catalog::FlagSpec) -> String {
     )
 }
 
-fn rust_type_check_fn(flag_type: &str) -> &'static str {
+fn rust_type_check_fn(flag_type: &FlagType) -> &'static str {
     match flag_type {
-        "bool" => "contract_check_bool",
-        "int" => "contract_check_int",
-        "float" => "contract_check_float",
-        "json" | "map" | "array" => "contract_check_json",
-        _ => "contract_check_string",
+        FlagType::Bool => "contract_check_bool",
+        FlagType::Int => "contract_check_int",
+        FlagType::Float => "contract_check_float",
+        FlagType::Json | FlagType::Map | FlagType::Array => "contract_check_json",
+        FlagType::String => "contract_check_string",
     }
 }
 
-fn ts_type_check_fn(flag_type: &str) -> &'static str {
+fn ts_type_check_fn(flag_type: &FlagType) -> &'static str {
     match flag_type {
-        "bool" => "contractCheckBool",
-        "int" => "contractCheckInt",
-        "float" => "contractCheckFloat",
-        "json" | "map" | "array" => "contractCheckJson",
-        _ => "contractCheckString",
+        FlagType::Bool => "contractCheckBool",
+        FlagType::Int => "contractCheckInt",
+        FlagType::Float => "contractCheckFloat",
+        FlagType::Json | FlagType::Map | FlagType::Array => "contractCheckJson",
+        FlagType::String => "contractCheckString",
     }
 }
 
-fn dart_type_check_fn(flag_type: &str) -> &'static str {
+fn dart_type_check_fn(flag_type: &FlagType) -> &'static str {
     match flag_type {
-        "bool" => "_contractCheckBool",
-        "int" => "_contractCheckInt",
-        "float" => "_contractCheckFloat",
-        "json" | "map" | "array" => "_contractCheckJson",
-        _ => "_contractCheckString",
+        FlagType::Bool => "_contractCheckBool",
+        FlagType::Int => "_contractCheckInt",
+        FlagType::Float => "_contractCheckFloat",
+        FlagType::Json | FlagType::Map | FlagType::Array => "_contractCheckJson",
+        FlagType::String => "_contractCheckString",
     }
 }
 
@@ -332,8 +354,11 @@ function contractCheckJson(raw: string): string | undefined {
 
 "#;
 
-const DART_TYPE_CHECKS: &str = r#"
+const DART_STRING_CHECK: &str = r#"
 String? _contractCheckString(String raw) => raw.isEmpty ? 'empty string' : null;
+"#;
+
+const DART_BOOL_CHECK: &str = r#"
 String? _contractCheckBool(String raw) {
   switch (raw) {
     case '0':
@@ -351,8 +376,17 @@ String? _contractCheckBool(String raw) {
       return 'not a bool env token: $raw';
   }
 }
+"#;
+
+const DART_INT_CHECK: &str = r#"
 String? _contractCheckInt(String raw) => int.tryParse(raw) == null ? 'not an int: $raw' : null;
+"#;
+
+const DART_FLOAT_CHECK: &str = r#"
 String? _contractCheckFloat(String raw) => double.tryParse(raw) == null ? 'not a float: $raw' : null;
+"#;
+
+const DART_JSON_CHECK: &str = r#"
 String? _contractCheckJson(String raw) {
   final trimmed = raw.trim();
   final ok = (trimmed.startsWith('{') && trimmed.endsWith('}')) ||

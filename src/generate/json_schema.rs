@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use crate::catalog::{example_values, is_secret_env, Catalog, FlagSpec};
+use crate::catalog::{example_values, is_secret_env, Catalog, FlagSpec, FlagType};
 use serde_json::{json, Map, Value};
 
 const DRAFT: &str = "https://json-schema.org/draft/2020-12/schema";
@@ -21,15 +21,15 @@ pub fn os_schema(catalog: &Catalog) -> Value {
     }
     let mut schema = Map::new();
     schema.insert("$schema".into(), json!(DRAFT));
-    schema.insert("$id".into(), json!(schema_id(catalog, "env.os.schema.json")));
+    schema.insert(
+        "$id".into(),
+        json!(schema_id(catalog, "env.os.schema.json")),
+    );
     schema.insert(
         "title".into(),
         json!(format!("{} resolved environment", catalog.type_name)),
     );
-    schema.insert(
-        "description".into(),
-        json!(os_description(catalog)),
-    );
+    schema.insert("description".into(), json!(os_description(catalog)));
     schema.insert("type".into(), json!("object"));
     schema.insert("additionalProperties".into(), json!(false));
     schema.insert("properties".into(), Value::Object(properties));
@@ -124,29 +124,29 @@ fn os_property(flag: &FlagSpec) -> Value {
     let mut prop = Map::new();
     prop.insert("type".into(), json!("string"));
     prop.insert("minLength".into(), json!(1));
-    match flag.flag_type.as_str() {
-        "bool" => {
+    match flag.flag_type {
+        FlagType::Bool => {
             prop.insert(
                 "enum".into(),
                 json!(["0", "1", "true", "false", "TRUE", "FALSE", "yes", "no", "YES", "NO"]),
             );
         }
-        "int" => {
+        FlagType::Int => {
             prop.insert("pattern".into(), json!(r"^-?[0-9]+$"));
         }
-        "float" => {
+        FlagType::Float => {
             prop.insert(
                 "pattern".into(),
                 json!(r"^-?[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?$"),
             );
         }
-        "json" | "map" | "array" => {
+        FlagType::Json | FlagType::Map | FlagType::Array => {
             prop.insert(
                 "description".into(),
                 json!("JSON-encoded value (object or array) as a string"),
             );
         }
-        _ => {}
+        FlagType::String => {}
     }
     if let Some(help) = &flag.help {
         prop.insert("description".into(), json!(help));
@@ -158,18 +158,18 @@ fn os_property(flag: &FlagSpec) -> Value {
         }
     }
     prop.insert("x-env-key".into(), json!(flag.env));
-    prop.insert("x-flag-type".into(), json!(flag.flag_type));
+    prop.insert("x-flag-type".into(), json!(flag.flag_type.as_str()));
     Value::Object(prop)
 }
 
 fn values_property(flag: &FlagSpec) -> Value {
-    let typed = match flag.flag_type.as_str() {
-        "bool" => json!({"type": "boolean"}),
-        "int" => json!({"type": "integer"}),
-        "float" => json!({"type": "number"}),
-        "array" => json!({"type": "array"}),
-        "map" | "json" => json!({"type": "object"}),
-        _ => json!({"type": "string", "minLength": 1}),
+    let typed = match flag.flag_type {
+        FlagType::Bool => json!({"type": "boolean"}),
+        FlagType::Int => json!({"type": "integer"}),
+        FlagType::Float => json!({"type": "number"}),
+        FlagType::Array => json!({"type": "array"}),
+        FlagType::Map | FlagType::Json => json!({"type": "object"}),
+        FlagType::String => json!({"type": "string", "minLength": 1}),
     };
     if flag.default.is_some() {
         return typed;
@@ -225,7 +225,10 @@ type = "bool"
             .unwrap()
             .iter()
             .any(|value| value == "DEMO_TOKEN"));
-        assert_eq!(schema["properties"]["DEMO_WORKERS"]["pattern"], r"^-?[0-9]+$");
+        assert_eq!(
+            schema["properties"]["DEMO_WORKERS"]["pattern"],
+            r"^-?[0-9]+$"
+        );
         assert!(schema["properties"]["DEMO_VERBOSE"]["enum"].is_array());
         let rendered = render_os_schema(&demo());
         assert!(rendered.contains("\"$schema\""));

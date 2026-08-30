@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use crate::catalog::{example_values, is_secret_env, to_pascal, Catalog};
+use crate::catalog::{example_values, is_secret_env, to_pascal, Catalog, FlagType};
 
 pub fn render(catalog: &Catalog) -> String {
     let type_name = to_pascal(&catalog.type_name);
@@ -146,12 +146,12 @@ fn rust_examples(flag: &crate::catalog::FlagSpec) -> String {
     )
 }
 
-fn rust_owned_type(flag_type: &str, has_default: bool) -> String {
+fn rust_owned_type(flag_type: &FlagType, has_default: bool) -> String {
     let inner = match flag_type {
-        "bool" => "bool",
-        "int" => "i64",
-        "float" => "f64",
-        _ => "String",
+        FlagType::Bool => "bool",
+        FlagType::Int => "i64",
+        FlagType::Float => "f64",
+        FlagType::Array | FlagType::Map | FlagType::Json | FlagType::String => "String",
     };
     if has_default {
         inner.to_string()
@@ -162,27 +162,31 @@ fn rust_owned_type(flag_type: &str, has_default: bool) -> String {
 
 fn rust_load_expr(flag: &crate::catalog::FlagSpec) -> String {
     let key = format!("\"{}\"", rust_escape(&flag.env));
-    match (flag.flag_type.as_str(), flag.default.as_deref()) {
-        ("bool", Some(default)) => format!(
+    match (flag.flag_type, flag.default.as_deref()) {
+        (FlagType::Bool, Some(default)) => format!(
             "parse_bool(lookup({key}), {})",
             default == "true" || default == "1"
         ),
-        ("bool", None) => format!("lookup({key}).map(|raw| parse_bool(Some(raw), false))"),
-        ("int", Some(default)) => format!(
+        (FlagType::Bool, None) => format!("lookup({key}).map(|raw| parse_bool(Some(raw), false))"),
+        (FlagType::Int, Some(default)) => format!(
             "parse_int(lookup({key}), {})",
             default.parse::<i64>().unwrap_or(0)
         ),
-        ("int", None) => format!("lookup({key}).and_then(|raw| raw.parse().ok())"),
-        ("float", Some(default)) => format!(
+        (FlagType::Int, None) => format!("lookup({key}).and_then(|raw| raw.parse().ok())"),
+        (FlagType::Float, Some(default)) => format!(
             "parse_float(lookup({key}), {})",
             default.parse::<f64>().unwrap_or(0.0)
         ),
-        ("float", None) => format!("lookup({key}).and_then(|raw| raw.parse().ok())"),
-        (_, Some(default)) => format!(
+        (FlagType::Float, None) => format!("lookup({key}).and_then(|raw| raw.parse().ok())"),
+        (FlagType::Array | FlagType::Map | FlagType::Json | FlagType::String, Some(default)) => {
+            format!(
             "lookup({key}).filter(|value| !value.is_empty()).unwrap_or_else(|| \"{}\".to_string())",
             rust_escape(default)
-        ),
-        (_, None) => format!("lookup({key}).filter(|value| !value.is_empty())"),
+        )
+        }
+        (FlagType::Array | FlagType::Map | FlagType::Json | FlagType::String, None) => {
+            format!("lookup({key}).filter(|value| !value.is_empty())")
+        }
     }
 }
 

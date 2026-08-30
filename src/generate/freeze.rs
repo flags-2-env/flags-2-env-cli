@@ -54,11 +54,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn temp_file(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "f2e-freeze-{}-{}",
-            std::process::id(),
-            name
-        ));
+        let dir = std::env::temp_dir().join(format!("f2e-freeze-{}-{}", std::process::id(), name));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir.join("artifact.txt")
