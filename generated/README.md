@@ -1,49 +1,58 @@
-# `generated/` — frozen artifacts (read-only)
+# `generated/` — frozen derivative artifacts (read-only)
 
 This tree is **generated**. Do not hand-edit anything here except this
-README if you are documenting a local exception.
+README when documenting a repository-specific exception.
 
 Typical producers:
 
 - [`flags-2-env`](https://github.com/flags-2-env/flags-2-env-cli) (`f2e generate`)
 - [`api-docs` / `ridl`](https://github.com/oresoftware/api-docs)
-- interface adapters from `schema/tables.json` (`node src/generate.mjs`)
+- interface adapters from independently authored contract sources
+
+## Authority classification
+
+For flags-2-env output, `.cli-flags.toml` is the human-authored source for
+CLI and process-environment configuration. Generated language bindings and
+`json-schema/env.*.schema.json` files are derivative projections. The emitted
+JSON Schema documents are runtime-validation witnesses; they are not an
+independently human-authored domain or API authority.
+
+For shared serialized domain, API, HTTP, RPC, event, persistence, or durable
+storage contracts, TypeSpec and JSON Schema/OpenAPI must be independent,
+human-authored peer authorities outside `generated/`. Neither may be generated
+from or overwrite the other. Translations and round trips are comparison
+evidence only. Any unexplained mismatch is `STOPPED_FOR_EVALUATION` and blocks
+publication, merge, release, migration, and deployment.
+
+Generated API documentation is also derivative. Its README must name the route
+or contract inputs and the exact producer.
 
 ## Read-only on disk
 
-After generate, artifact files are `chmod a-w` (0444). Directories stay
-writable so the generator can add files. The generator unfreezes, writes,
-then freezes again.
+After generation, artifact files are `chmod a-w` (normally 0444). A repository
+may also freeze idle generated directories (normally 0555). The generator
+unfreezes, writes, and freezes again.
 
 **Git does not store the Unix write bit** — only the executable bit
-(100644 vs 100755). After `git clone` / `git checkout`, files come back
-writable. Restore the policy with:
+(100644 vs 100755). After `git clone` or `git checkout`, files come back
+writable. Restore the local policy with the pinned generator or the
+repository's freeze command.
 
-```sh
-f2e generate          # or ridl generate / node src/generate.mjs
-# or
-chmod a-w generated/**/*.rs generated/**/*.ts generated/**/*.dart generated/**/*.json
-# or
-scripts/freeze-generated.sh
-```
+Do not `chmod u+w` and then commit a hand-edit. Change the documented
+human-authored source and regenerate. Select only output languages with a
+verified consumer or packaging pipeline.
 
-Do not `chmod u+w` and then commit a hand-edit. Change the source catalog
-(`.cli-flags.toml`, route map, `schema/tables.json`) and regenerate.
+## Validation and drift
 
-## JSON Schema (the contract)
-
-If `json-schema/` is present, those documents are JSON Schema 2020-12.
-They are the interchange contract across Rust, TypeScript, and Dart.
-
-- Compile-time types are generated *from* that catalog.
-- Runtime `check_os_env` / `checkOsEnv` / `validate()` must pass on real
-  payloads, not only on types that compile.
-- Unit tests should feed **valid** and **invalid** instances (missing
-  required keys, wrong types, extra properties).
+Runtime checkers must exercise valid and invalid instances; compilation alone
+is not sufficient.
 
 ```sh
 f2e check-contract --config .cli-flags.toml --json env.fixture.json
 ```
+
+CI must rerun the pinned generator and fail when
+`git diff --exit-code -- generated/` reports drift.
 
 ## Gitignored trees
 
@@ -55,7 +64,5 @@ generated/*
 !generated/README.md
 ```
 
-(Do not ignore the directory node itself as `generated/` — that prevents
-the `!README.md` exception from working.)
-
-Regenerate after clone; CI should fail if checked-in artifacts drift.
+Do not ignore the directory node itself as `generated/`, because that prevents
+the README exception from working.
