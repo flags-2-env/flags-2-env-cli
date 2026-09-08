@@ -1,26 +1,42 @@
 <!-- generated-policy: frozen -->
 
-# `generated/` — committed, and not hand-editable
+# `generated/` — frozen derivative artifacts (read-only)
+
+This tree is **generated**. Do not hand-edit anything here except this
+README when documenting a repository-specific exception.
 
 Everything in this directory is machine-written and **committed to version
-control**. Do not edit these files by hand — the only exception is this README,
-if you are documenting a local exception. Change the source they come from and
-re-run the generator.
+control**. Typical producers:
 
-Typical producers:
+- [`flags-2-env`](https://github.com/flags-2-env/flags-2-env-cli) (`f2e generate`)
+- [`api-docs` / `ridl`](https://github.com/oresoftware/api-docs)
+- interface adapters from independently authored contract sources
 
-- [`flags-2-env`](https://github.com/flags-2-env/flags-2-env-cli) (`f2e generate`) —
-  the Rust/TypeScript/Dart/Gleam adapters and `generated/json-schema/`
-- [`api-docs` / `ridl`](https://github.com/oresoftware/api-docs) — route maps and clients
-- interface adapters from `schema/tables.json` (`node src/generate.mjs`)
+## Authority classification
+
+For flags-2-env output, `.cli-flags.toml` is the human-authored source for
+CLI and process-environment configuration. Generated language bindings and
+`json-schema/env.*.schema.json` files are derivative projections. The emitted
+JSON Schema documents are runtime-validation witnesses; they are not an
+independently human-authored domain or API authority.
+
+For shared serialized domain, API, HTTP, RPC, event, persistence, or durable
+storage contracts, TypeSpec and JSON Schema/OpenAPI must be independent,
+human-authored peer authorities outside `generated/`. Neither may be generated
+from or overwrite the other. Translations and round trips are comparison
+evidence only. Any unexplained mismatch is `STOPPED_FOR_EVALUATION` and blocks
+publication, merge, release, migration, and deployment.
+
+Generated API documentation is also derivative. Its README must name the route
+or contract inputs and the exact producer.
 
 ## Why the files are read-only on disk
 
 After generation, artifact files are frozen with `chmod a-w` (0444). Directories
-and this `README.md` stay writable so the generator can add and replace files;
-the generator unfreezes, writes, then freezes again. Your editor will refuse the
-write, which is the point — it turns "I edited the wrong file" into an error you
-see immediately rather than a diff you notice in review.
+and this `README.md` normally stay writable so the generator can add and replace
+files; a repository may also freeze an idle generated directory (normally 0555).
+The generator unfreezes, writes, then freezes again. Your editor will refuse a
+direct artifact write, turning an accidental hand edit into an immediate error.
 
 **Git does not store this.** Git tracks only the executable bit (100644 vs
 100755), so a fresh `git clone` / `git checkout` comes back writable. The
@@ -34,8 +50,11 @@ python3 scripts/check-generated-contract.py --freeze --require-readonly
 chmod a-w generated/**/*.rs generated/**/*.ts generated/**/*.dart generated/**/*.gleam generated/**/*.json
 ```
 
-Do not `chmod u+w` and then commit a hand-edit. Change the source catalog
-(`.cli-flags.toml`, route map, `schema/tables.json`) and regenerate.
+Do not `chmod u+w` and then commit a hand-edit. Change the documented
+human-authored source and regenerate. Select only output languages with a
+verified consumer or packaging pipeline.
+
+## Validation and drift
 
 ## What actually enforces the policy
 
@@ -65,12 +84,13 @@ REGEN=1 git commit -m "Regenerate adapters from the updated flag catalog"
 
 CI should fail if checked-in artifacts drift from their source.
 
-## JSON Schema (the contract)
+## Runtime validation witnesses
 
 The documents under `generated/json-schema/` are JSON Schema 2020-12 and are the
-interchange contract across Rust, TypeScript, Dart and Gleam. The schema is an
-independently derived description of the same contract as the generated types —
-disagreement means one of them has drifted.
+runtime-validation projection of the human-authored `.cli-flags.toml` contract
+across Rust, TypeScript, Dart and Gleam. The schema and generated types must
+agree with that source; disagreement means one of the derivative artifacts has
+drifted.
 
 - Compile-time types are generated *from* the flag catalog.
 - Runtime `check_os_env` / `checkOsEnv` / `validate()` must pass on real
@@ -82,6 +102,9 @@ disagreement means one of them has drifted.
 ```sh
 f2e check-contract --config .cli-flags.toml --json env.fixture.json
 ```
+
+CI must rerun the pinned generator and fail when
+`git diff --exit-code -- generated/` reports drift.
 
 ## Gitignored trees
 
