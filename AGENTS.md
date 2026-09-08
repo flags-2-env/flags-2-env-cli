@@ -41,7 +41,6 @@ Functional programming is mostly the following:
 ## Functional programming conformance
 
 This repository carries an FP conformance ratchet. Before you land a change:
-
 ```sh
 python3 tools/fp-conformance/fp_conformance.py .
 ```

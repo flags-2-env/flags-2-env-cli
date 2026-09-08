@@ -37,8 +37,8 @@ identically on a laptop and on a CI runner.
 ## The budget, and why CI is not red today
 
 `tools/fp-conformance/budget.json` records the per-rule counts at the moment this
-check was introduced: **106 findings across 24 files
-and 3,627 lines**. CI compares against that budget and fails only when a
+check was introduced: **130 findings across 26 files
+and 4,332 lines**. CI compares against that budget and fails only when a
 rule's count *increases*. The existing backlog blocks nobody; new violations do.
 
 The budget is a ratchet. It should only ever move down. When you clear a class of
@@ -55,17 +55,19 @@ Raising the budget to turn CI green defeats the whole mechanism. Fix the code.
 
 | rule | count | severity | principle | what it flags |
 |---|---:|---|---|---|
-| `RS001` | 40 | warn | immutable values | mutable local binding (`let mut`) |
-| `RS003` | 29 | error | typed errors | panic-based control flow (`unwrap`/`expect`/`panic!`) |
-| `RS004` | 16 | warn | illegal states excluded by types | wildcard match arm defeats exhaustiveness |
-| `RS007` | 9 | warn | effects pushed outward | direct stdout/stderr effect in library code |
-| `TS009` | 4 | warn | explicit inputs | ambient impurity (clock / randomness / env) read inside pure code |
+| `RS001` | 51 | warn | immutable values | mutable local binding (`let mut`) |
+| `RS003` | 33 | error | typed errors | panic-based control flow (`unwrap`/`expect`/`panic!`) |
+| `RS004` | 19 | warn | illegal states excluded by types | wildcard match arm defeats exhaustiveness |
+| `RS007` | 11 | warn | effects pushed outward | direct stdout/stderr effect in library code |
+| `TS009` | 5 | warn | explicit inputs | ambient impurity (clock / randomness / env) read inside pure code |
+| `XX001` | 2 | warn | composition | oversized module |
 | `DA001` | 1 | warn | immutable values | `var` binding instead of `final` |
 | `DA003` | 1 | warn | immutable values | mutable (non-`final`) instance field |
 | `DA005` | 1 | warn | typed errors | `throw` as control flow |
 | `DA008` | 1 | warn | pure transformations | in-place collection mutation |
 | `DA009` | 1 | warn | illegal states excluded by types | `default:` arm defeats exhaustiveness |
 | `TS002` | 1 | warn | immutable values | mutable `let` binding |
+| `TS004` | 1 | warn | pure transformations | in-place array mutation |
 | `TS006` | 1 | warn | typed errors | `throw` as control flow |
 | `TS010` | 1 | warn | illegal states excluded by types | non-null assertion (`!`) suppresses a real case |
 
@@ -73,34 +75,39 @@ Raising the budget to turn CI green defeats the whole mechanism. Fix the code.
 
 ### `RS001` — mutable local binding (`let mut`)
 
-*immutable values* · 40 occurrences at baseline
+*immutable values* · 51 occurrences at baseline
 
 Rebind with `let`, fold with an iterator, or build the value with `collect()`/`fold()` instead of mutating in place.
 
 ### `RS003` — panic-based control flow (`unwrap`/`expect`/`panic!`)
 
-*typed errors* · 29 occurrences at baseline
+*typed errors* · 33 occurrences at baseline
 
 Return `Result<T, E>` with a domain error enum and propagate with `?`; reserve panics for genuinely unreachable invariants proven by types.
 
 ### `RS004` — wildcard match arm defeats exhaustiveness
 
-*illegal states excluded by types* · 16 occurrences at baseline
+*illegal states excluded by types* · 19 occurrences at baseline
 
 Enumerate the remaining variants explicitly so adding a variant becomes a compile error.
 
 ### `RS007` — direct stdout/stderr effect in library code
 
-*effects pushed outward* · 9 occurrences at baseline
+*effects pushed outward* · 11 occurrences at baseline
 
 Emit through the ores-otel tracing layer so the effect lives at the outward edge and stays observable.
 
 ### `TS009` — ambient impurity (clock / randomness / env) read inside pure code
 
-*explicit inputs* · 4 occurrences at baseline
+*explicit inputs* · 5 occurrences at baseline
 
 Take the value as a parameter — inject a clock, a seeded RNG, or a config object — so the function stays testable and deterministic.
 
+### `XX001` — oversized module
+
+*composition* · 2 occurrences at baseline
+
+Split into focused modules; the guidelines call for modularisation rather than a single large entry point.
 ### `DA001` — `var` binding instead of `final`
 
 *immutable values* · 1 occurrence at baseline
@@ -130,7 +137,6 @@ Build a new collection with spread or `followedBy`/`where`/`map` instead of muta
 *illegal states excluded by types* · 1 occurrence at baseline
 
 Switch over a sealed class and list every subtype so a new variant becomes a compile error.
-
 ## Language-native enforcement
 
 The Python scanner is the portable floor — it runs everywhere and costs nothing.
