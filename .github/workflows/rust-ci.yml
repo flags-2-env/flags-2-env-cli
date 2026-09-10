@@ -1,0 +1,49 @@
+name: Rust CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: exact-head Rust verification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Verify exact candidate
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.90.0 --profile minimal --component rustfmt,clippy
+
+      - name: Resolve the intentionally untracked lockfile
+        run: cargo +1.90.0 generate-lockfile
+
+      - name: Check canonical formatting
+        run: cargo +1.90.0 fmt --all -- --check
+
+      - name: Check all targets and features
+        run: cargo +1.90.0 check --all-targets --all-features --locked
+
+      - name: Run strict Clippy
+        run: cargo +1.90.0 clippy --all-targets --all-features --locked -- -D warnings
+
+      - name: Run tests
+        run: cargo +1.90.0 test --all-targets --all-features --locked
