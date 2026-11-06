@@ -1,0 +1,29 @@
+// Source-only AttoLang selection policy for flags2env's canonical three sources.
+// Returns 1=flag, 2=shell env, 3=dotenv, 0=unset. It does not read environment.
+define module flags_env_policy as
+  pub fnc winning_source(bool flag_present, bool shell_present,
+                         bool dotenv_present, bool dotenv_enabled,
+                         bool dotenv_overrides_shell): int {
+    if flag_present {
+      return 1;
+    }
+    if dotenv_overrides_shell && dotenv_enabled && dotenv_present {
+      return 3;
+    }
+    if shell_present {
+      return 2;
+    }
+    if dotenv_enabled && dotenv_present {
+      return 3;
+    }
+    return 0;
+  }
+
+  pub fnc self_check(): bool {
+    return winning_source(true,true,true,true,true) == 1 &&
+      winning_source(false,true,true,true,false) == 2 &&
+      winning_source(false,true,true,true,true) == 3 &&
+      winning_source(false,false,true,false,true) == 0 &&
+      winning_source(false,false,false,true,false) == 0;
+  }
+end
