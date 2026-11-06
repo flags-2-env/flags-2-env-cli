@@ -38,7 +38,6 @@ function run(){
  must(resolve(forged,false,false)==="unset","invented missing config");
  // Negative mutation would force dotenv when disabled: explicitly reject as a violation.
  const mutatedWinner="env_file";
- must(!(!false&&mutatedWinner!=="env_file"),"invalid fixture");
  must(mutatedWinner!==resolve({flags:false,env_shell:false,env_file:true},false,false),
   "negative mutation did not detect disabled dotenv");
  return {combinations:16,decisions:examined,winners:wins,overrideDifference,claim:"finite precedence policy only"};
