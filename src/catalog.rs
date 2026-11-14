@@ -199,14 +199,18 @@ fn parse_order_of_preference(table: Option<&toml::Table>) -> Vec<(String, Vec<St
         .collect()
 }
 
-fn complete_source_order(mut order: Vec<String>) -> Vec<String> {
-    order.retain(|source| matches!(source.as_str(), "flags" | "env_shell" | "env_file"));
-    for source in default_source_order() {
-        if !order.iter().any(|item| item == &source) {
-            order.push(source);
-        }
-    }
+fn complete_source_order(order: Vec<String>) -> Vec<String> {
+    // First occurrence wins; each valid source is evaluated at most once.
     order
+        .into_iter()
+        .chain(default_source_order())
+        .filter(|source| matches!(source.as_str(), "flags" | "env_shell" | "env_file"))
+        .fold(Vec::new(), |mut unique, source| {
+            if !unique.contains(&source) {
+                unique.push(source);
+            }
+            unique
+        })
 }
 
 fn collect_flags(table: &toml::Table, flags: &mut Vec<FlagSpec>) -> Result<(), CliError> {
@@ -610,7 +614,26 @@ fn is_ident_start(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_catalog, to_pascal, to_snake, FlagType};
+    use super::{complete_source_order, parse_catalog, to_pascal, to_snake, FlagType};
+
+    #[test]
+    fn preference_order_keeps_first_source_and_never_repeats_sources() {
+        let order = vec![
+            "env_file".into(),
+            "env_file".into(),
+            "flags".into(),
+            "unsupported".into(),
+            "flags".into(),
+        ];
+        assert_eq!(
+            complete_source_order(order),
+            vec!["env_file", "flags", "env_shell"]
+        );
+        assert_eq!(
+            complete_source_order(Vec::new()),
+            vec!["flags", "env_shell", "env_file"]
+        );
+    }
 
     #[test]
     fn snake_and_pascal_split_hyphens_and_case() {
