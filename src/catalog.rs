@@ -200,9 +200,15 @@ fn parse_order_of_preference(table: Option<&toml::Table>) -> Vec<(String, Vec<St
 }
 
 fn complete_source_order(mut order: Vec<String>) -> Vec<String> {
-    order.retain(|source| matches!(source.as_str(), "flags" | "env_shell" | "env_file"));
+    // Keep the first occurrence of each source. Duplicate precedence entries
+    // must never cause a source to be evaluated more than once.
+    let mut seen = std::collections::BTreeSet::new();
+    order.retain(|source| {
+        matches!(source.as_str(), "flags" | "env_shell" | "env_file")
+            && seen.insert(source.clone())
+    });
     for source in default_source_order() {
-        if !order.iter().any(|item| item == &source) {
+        if seen.insert(source.clone()) {
             order.push(source);
         }
     }
@@ -610,7 +616,26 @@ fn is_ident_start(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_catalog, to_pascal, to_snake, FlagType};
+    use super::{complete_source_order, parse_catalog, to_pascal, to_snake, FlagType};
+
+    #[test]
+    fn preference_order_keeps_first_source_and_never_repeats_sources() {
+        let order = vec![
+            "env_file".into(),
+            "env_file".into(),
+            "flags".into(),
+            "unsupported".into(),
+            "flags".into(),
+        ];
+        assert_eq!(
+            complete_source_order(order),
+            vec!["env_file", "flags", "env_shell"]
+        );
+        assert_eq!(
+            complete_source_order(Vec::new()),
+            vec!["flags", "env_shell", "env_file"]
+        );
+    }
 
     #[test]
     fn snake_and_pascal_split_hyphens_and_case() {
