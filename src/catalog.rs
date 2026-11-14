@@ -199,20 +199,18 @@ fn parse_order_of_preference(table: Option<&toml::Table>) -> Vec<(String, Vec<St
         .collect()
 }
 
-fn complete_source_order(mut order: Vec<String>) -> Vec<String> {
-    // Keep the first occurrence of each source. Duplicate precedence entries
-    // must never cause a source to be evaluated more than once.
-    let mut seen = std::collections::BTreeSet::new();
-    order.retain(|source| {
-        matches!(source.as_str(), "flags" | "env_shell" | "env_file")
-            && seen.insert(source.clone())
-    });
-    for source in default_source_order() {
-        if seen.insert(source.clone()) {
-            order.push(source);
-        }
-    }
+fn complete_source_order(order: Vec<String>) -> Vec<String> {
+    // First occurrence wins; each valid source is evaluated at most once.
     order
+        .into_iter()
+        .chain(default_source_order())
+        .filter(|source| matches!(source.as_str(), "flags" | "env_shell" | "env_file"))
+        .fold(Vec::new(), |mut unique, source| {
+            if !unique.contains(&source) {
+                unique.push(source);
+            }
+            unique
+        })
 }
 
 fn collect_flags(table: &toml::Table, flags: &mut Vec<FlagSpec>) -> Result<(), CliError> {
